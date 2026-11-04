@@ -23,8 +23,8 @@ const POLL_MS = 15_000
 const GH_TTL = 120_000
 /** 命令触发后等 GitHub 落盘再查 */
 const AFTER_CMD_MS = 1500
-/** 合并目标：dev 或 release 开头的分支 */
-const BASE_RE = /^(dev|release)/
+/** 合并目标：dev 本身，或 release 开头的分支（devops 之类不算） */
+const BASE_RE = /^(dev$|release)/
 /** 当前分支本身就是这些时不显示 PR 状态 */
 const SKIP_RE = /^(main|master|dev|release)/
 
@@ -93,7 +93,7 @@ async function currentBranch($: Dollar, cwd: string): Promise<string | null> {
   return r.exitCode === 0 ? r.stdout.trim() || null : null
 }
 
-// 分支尖端是某个 dev*/release* 的祖先，且是经由合并提交进去的（不在其第一父链上），
+// 分支尖端是 dev 或某个 release* 的祖先，且是经由合并提交进去的（不在其第一父链上），
 // 才算真正合并；刚拉出来还没提交的新分支、或快进，都在第一父链上，不算。
 async function findLocalMerge($: Dollar, cwd: string, branch: string): Promise<string | null> {
   const tipRun = await git($, cwd, ['rev-parse', '--verify', '--quiet', branch])

@@ -12,7 +12,7 @@ export type BranchPr = {
   checkedAt: number
 }
 
-/** 当前分支是否已真正合并进本地 / origin 上 dev* 或 release* 开头的分支 */
+/** 当前分支是否已真正合并进本地 / origin 上的 dev，或 release 开头的分支 */
 export type LocalMerge = { branch: string; into: string | null }
 
 declare module 'claude-code' {

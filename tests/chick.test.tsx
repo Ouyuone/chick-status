@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 const BAND = {
   plugin: 'chick-status',
@@ -14,11 +15,11 @@ const BAND = {
   },
 } as const
 
-type On = Parameters<Parameters<typeof test>[1]>[1]
+type On = Parameters<TestBody>[1]
 type Run = { exitCode: number; stdout: string }
 
-// 假仓库：分支名、gh 返回、本地是否已合并进 origin/dev 都可在测试中改
-type Repo = { branch: string | null; gh: string; mergedIntoDev: boolean }
+// 假仓库：分支名、gh 返回、候选分支列表、本地是否已合并进候选分支都可在测试中改
+type Repo = { branch: string | null; gh: string; mergedIntoDev: boolean; refs?: string }
 
 function engine(on: On, repo: Repo) {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -33,7 +34,7 @@ function engine(on: On, repo: Repo) {
     let r: Run = fail
     if (a.includes('symbolic-ref')) r = repo.branch ? ok(`${repo.branch}\n`) : fail
     else if (a.includes('rev-parse --verify')) r = ok('t1\n')
-    else if (a.includes('for-each-ref')) r = ok('dev\norigin/dev\nfeature/x\n')
+    else if (a.includes('for-each-ref')) r = ok(repo.refs ?? 'dev\norigin/dev\nfeature/x\n')
     else if (a.includes('merge-base --is-ancestor')) r = repo.mergedIntoDev ? ok('') : fail
     else if (a.includes('rev-list')) r = ok('m1\n')
     else if (a.includes('rev-parse m1^1')) r = ok('p0\n')
@@ -89,6 +90,32 @@ test('本地已并入 dev：显示"已并入 dev"', async ($, on) => {
 
   const ui = await $.ui.mount(BAND)
   expect(await text(ui)).toContain('已并入 dev')
+  await ui.unmount()
+})
+
+test('只认 dev 本身和 release*：并入 devops 不算', async ($, on) => {
+  const clock = engine(on, {
+    branch: 'feature/x', gh: '[]', mergedIntoDev: true,
+    refs: 'devops\norigin/devops\norigin/development\nfeature/x\n',
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  const ui = await $.ui.mount(BAND)
+  expect(await text(ui)).not.toContain('已并入')
+  await ui.unmount()
+})
+
+test('release 开头的分支照常算', async ($, on) => {
+  const clock = engine(on, {
+    branch: 'feature/x', gh: '[]', mergedIntoDev: true,
+    refs: 'origin/devops\norigin/release/1.2\nfeature/x\n',
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  const ui = await $.ui.mount(BAND)
+  expect(await text(ui)).toContain('已并入 release/1.2')
   await ui.unmount()
 })
 
