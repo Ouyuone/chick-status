@@ -38,6 +38,15 @@ claude plugin install chick-status --marketplace Ouyuone/chick-status
 
 桌面应用里 `/plugin` 不可用：点输入框旁的 **+**，选 **Plugins** → **Add marketplace**，填 `Ouyuone/chick-status`，再 **Add plugin**。
 
+## 更新
+
+```
+claude plugin marketplace update ouyuone
+claude plugin update chick-status@ouyuone
+```
+
+然后在会话里运行 `/reload-plugins`，或重开会话。
+
 ## 依赖
 
 - `git`：读取当前分支、判断本地合并。
