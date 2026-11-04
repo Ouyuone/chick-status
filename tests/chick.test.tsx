@@ -119,6 +119,31 @@ test('release 开头的分支照常算', async ($, on) => {
   await ui.unmount()
 })
 
+test('devops 分支上照常显示 PR 状态', async ($, on) => {
+  const clock = engine(on, {
+    branch: 'devops', gh: '[{"state":"OPEN","number":7}]', mergedIntoDev: false,
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  const ui = await $.ui.mount(BAND)
+  expect(await text(ui)).toContain('#7 open')
+  await ui.unmount()
+})
+
+test('main、master、dev 本身和 release* 分支上不显示 PR 状态', async ($, on) => {
+  const repo: Repo = { branch: 'dev', gh: '[{"state":"OPEN","number":7}]', mergedIntoDev: false }
+  const clock = engine(on, repo)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  for (const branch of ['dev', 'main', 'master', 'release/1.2']) {
+    repo.branch = branch
+    await clock.advance(15_000)
+    const ui = await $.ui.mount(BAND)
+    expect(await text(ui)).not.toContain('#7')
+    await ui.unmount()
+  }
+})
+
 test('gh pr merge 命令：立即演动画并强制刷新', async ($, on) => {
   const repo: Repo = {
     branch: 'feature/x', gh: '[{"state":"OPEN","number":12}]', mergedIntoDev: false,

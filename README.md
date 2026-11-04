@@ -14,6 +14,7 @@ Claude Code 的像素小鸡 mod：一只小鸡站在输入框上方右侧，用�
 气泡旁的标签显示当前分支最新 PR：`● #12 open`、`◆ #12 merged`、`✕ #12 closed`。当前分支已经真正合并进本地或 `origin` 上的 `dev`，或以 `release` 开头的分支时（`devops` 这类只是以 dev 开头的分支不算），还会显示 `◆ 已并入 <分支>`。
 
 - PR 状态以 `gh pr list` 轮询为准（每 15 秒检查一次，结果缓存 2 分钟）。
+- 当前分支是 `main`、`master`、`dev` 本身或以 `release` 开头时不显示 PR 标签；`devops` 这类分支照常显示。
 - 在会话里执行 `gh pr create / merge / close / reopen` 或调用 GitHub MCP 的 PR 工具时，立即播放动画并马上刷新。
 - 终端窄于 40 列时只显示一行文字。
 - `/chick` 显示或隐藏小鸡，设置会被记住。
