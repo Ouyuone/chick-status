@@ -1,0 +1,6 @@
+{
+  "name": "chick-status",
+  "version": "0.1.0",
+  "description": "像素小鸡站在输入框上方右侧，展示会话处理中/完成，以及当前分支 PR 状态（gh 轮询 + 本地合并判断）",
+  "types": "./types/index.d.ts"
+}
