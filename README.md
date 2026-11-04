@@ -50,3 +50,7 @@ claude plugin validate .
 claude plugin test .
 claude --plugin-dir .
 ```
+
+## 许可证
+
+[MIT](LICENSE)
