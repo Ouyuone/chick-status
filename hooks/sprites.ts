@@ -230,6 +230,8 @@ function build(base: string[], extra: Px[] = [], rows: Rows = {}): string[] {
 
 // ---------- 表情、翅膀：按固定坐标改像素 ----------
 
+const range = (a: number, b: number) => Array.from({ length: b - a }, (_, i) => a + i)
+
 const blink = (f: string): Px[] => [[4, 3, f], [4, 4, f], [4, 9, f], [4, 10, f]]
 const happy = (f: string): Px[] => [
   [4, 3, 'K'], [4, 4, 'K'], [4, 9, 'K'], [4, 10, 'K'],
@@ -248,10 +250,14 @@ const WING_UP: Px[] = [[5, 2, 'E'], [5, 11, 'E'], [6, 1, 'E'], [6, 12, 'E']]
 // 右翅举起来握旗杆
 const holdFlag = (s: Species): Px[] => [[6, 12, 'E'], [6, 13, 'E'], [7, 12, s.body]]
 const TEARS: Px[] = [[6, 3, 'B'], [7, 3, 'B']]
+// 走路时左右脚轮流抬起，飞的时候脚收起来
+const clearFeet = (from: number, to: number): Px[] => range(from, to).map((c): Px => [11, c, '.'])
+const LIFT_LEFT = clearFeet(0, 7)
+const LIFT_RIGHT = clearFeet(7, 14)
+const TUCK_FEET = clearFeet(0, 14)
 
 // ---------- 道具 ----------
 
-const range = (a: number, b: number) => Array.from({ length: b - a }, (_, i) => a + i)
 const FLAG: Px[] = [
   ...range(0, 11).map((r): Px => [r, 14, 'D']),
   ...range(0, 3).flatMap(r => range(15, 19).map((c): Px => [r, c, 'F'])),
@@ -275,13 +281,19 @@ const WINGS_OUT: Px[] = [
 const MINI_Z: Px[] = [[0, 15, 'Z'], [0, 16, 'Z'], [1, 16, 'Z'], [2, 15, 'Z'], [2, 16, 'Z']]
 
 export type Pose =
-  | 'work1' | 'work2' | 'done' | 'sleep' | 'open' | 'merged' | 'closed' | 'mini'
+  | 'walkL' | 'walkR' | 'walkLFlap' | 'walkRFlap' | 'fly1' | 'fly2'
+  | 'done' | 'sleep' | 'open' | 'merged' | 'closed' | 'mini'
 
 function grids(s: Species): Record<Pose, string[]> {
   const sadTop: Rows = s.sadTop ? { 0: s.sadTop } : {}
   return {
-    work1: build(s.base),
-    work2: build(s.base, [...blink(s.face), ...hideWings(s), ...WINGS_OUT]),
+    // 边走边扇翅膀：抬左脚 / 抬右脚 × 翅膀收起 / 张开
+    walkL: build(s.base, LIFT_LEFT),
+    walkR: build(s.base, LIFT_RIGHT),
+    walkLFlap: build(s.base, [...blink(s.face), ...hideWings(s), ...WINGS_OUT, ...LIFT_LEFT]),
+    walkRFlap: build(s.base, [...blink(s.face), ...hideWings(s), ...WINGS_OUT, ...LIFT_RIGHT]),
+    fly1: build(s.base, [...hideWings(s), ...WING_UP, ...TUCK_FEET]),
+    fly2: build(s.base, [...blink(s.face), ...hideWings(s), ...WINGS_OUT, ...TUCK_FEET]),
     done: build(s.base, [...happy(s.face), ...SPARKLE]),
     sleep: build(s.base, [...blink(s.face), ...ZZZ]),
     open: build(s.base, [...holdFlag(s), ...FLAG]),

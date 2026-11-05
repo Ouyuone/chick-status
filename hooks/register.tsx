@@ -1,13 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
 
-import type { BranchPr, Flash, FlashKind, Pet, PrState } from '../types'
+import type { BranchPr, Flash, FlashKind, Flight, Pet, PrState } from '../types'
 import { PETS, SPECIES, SPRITES, W } from './sprites'
 import type { Pose } from './sprites'
 
 const workingSince = atom({ plugin: 'chick-status', key: 'workingSince' } as const, null)
 const lastSeconds = atom({ plugin: 'chick-status', key: 'lastSeconds' } as const, null)
 const flash = atom({ plugin: 'chick-status', key: 'flash' } as const, null)
+const flight = atom({ plugin: 'chick-status', key: 'flight' } as const, null)
 const branchPr = atom({ plugin: 'chick-status', key: 'branchPr' } as const, null)
 const localMerge = atom({ plugin: 'chick-status', key: 'localMerge' } as const, null)
 const tick = atom({ plugin: 'chick-status', key: 'tick' } as const, 0)
@@ -21,6 +22,20 @@ const RANDOM_WORDS = ['random', '随机']
 const FLASH_MS: Record<FlashKind, number> = { done: 5000, open: 3000, merged: 3000, closed: 3000 }
 const MIN_COLUMNS = 40
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+
+/** 走路、飞行时每帧的间隔；只有临时造型时每秒一帧 */
+const FAST_MS = 200
+const SLOW_MS = 1000
+/** 走一格（一列）要多久 */
+const STEP_MS = 200
+/** 边走边扇翅膀：翅膀每隔多久扇一下 */
+const FLAP_MS = 600
+/** 飞回原位：每秒飞多少列，再限定最短、最长时间 */
+const FLY_COLUMNS_PER_S = 40
+const FLY_MIN_MS = 500
+const FLY_MAX_MS = 2500
+/** 宠物身体中心在精灵图里的列（左边留白 2 列 + 身体 14 列的一半） */
+const BODY_CENTER = 9
 
 /** 本地检查（git）的周期；GitHub 查询受 GH_TTL 限制 */
 const POLL_MS = 15_000
@@ -38,6 +53,9 @@ const PR_MCP = /^mcp__.*github.*__(create_pull_request|merge_pull_request|update
 type Dollar = EngineInterface
 
 let ticker: Timer | undefined
+let tickerMs = 0
+/** 最近一次画的时候宠物最远能走到哪一列；起飞时用来算飞多远 */
+let lastMaxX = 79
 let poller: Timer | undefined
 let isRefreshing = false
 let isForcePending = false
@@ -63,20 +81,22 @@ const PET_LIST = PETS.map(p => `${SPECIES[p].name}（${p}）`).join('、')
 
 // ---------- 动画 ----------
 
-// 处理中或有临时造型时每秒走一帧，否则停表
+// 走路、飞行时快速走帧，只有临时造型时每秒一帧，都没有就停表
 async function ensureTicker($: Dollar) {
-  const busy = (await read($, workingSince)) !== null || (await read($, flash)) !== null
-  if (busy && !ticker) {
-    ticker = $.clock.every(1000, () => void onTick($))
-  } else if (!busy && ticker) {
-    ticker.cancel()
-    ticker = undefined
-  }
+  const moving = (await read($, workingSince)) !== null || (await read($, flight)) !== null
+  const ms = moving ? FAST_MS : (await read($, flash)) !== null ? SLOW_MS : 0
+  if (ms === tickerMs) return
+  ticker?.cancel()
+  ticker = ms ? $.clock.every(ms, () => void onTick($)) : undefined
+  tickerMs = ms
 }
 
 async function onTick($: Dollar) {
+  const now = await $.clock.now()
   const f = await read($, flash)
-  if (f && (await $.clock.now()) >= f.until) await update($, flash, () => null)
+  if (f && now >= f.until) await update($, flash, () => null)
+  const fl = await read($, flight)
+  if (fl && now >= fl.at + fl.ms) await update($, flight, () => null)
   await update($, tick, n => n + 1)
   await ensureTicker($)
 }
@@ -99,7 +119,53 @@ async function resetSession($: Dollar) {
   await update($, workingSince, () => null)
   await update($, lastSeconds, () => null)
   await update($, flash, () => null)
+  await update($, flight, () => null)
   await ensureTicker($)
+}
+
+// ---------- 走动 ----------
+
+// 走了 walkedMs 之后离左边多少列：从最右边的原位出发往左走，到头折返
+function walkX(walkedMs: number, maxX: number): number {
+  if (maxX <= 0) return 0
+  const steps = Math.floor(walkedMs / STEP_MS) % (2 * maxX)
+  return maxX - (steps <= maxX ? steps : 2 * maxX - steps)
+}
+
+// 飞多久：按离原位的距离算
+function flyMs(walkedMs: number, maxX: number): number {
+  const distance = maxX - walkX(walkedMs, maxX)
+  const ms = (distance / FLY_COLUMNS_PER_S) * 1000
+  return Math.round(Math.min(FLY_MAX_MS, Math.max(FLY_MIN_MS, ms)))
+}
+
+// 飞回原位：从起飞点先快后慢地飞到最右边
+function flyX(f: Flight, now: number, maxX: number): number {
+  const from = walkX(f.walkedMs, maxX)
+  const p = Math.min(1, Math.max(0, (now - f.at) / f.ms))
+  const eased = 1 - (1 - p) ** 2
+  return Math.round(from + (maxX - from) * eased)
+}
+
+// 每走一步换一只脚，每 FLAP_MS 扇一下翅膀
+function walkPose(walkedMs: number): Pose {
+  const isLeft = Math.floor(walkedMs / STEP_MS) % 2 === 0
+  const isFlap = Math.floor(walkedMs / FLAP_MS) % 2 === 1
+  return isFlap ? (isLeft ? 'walkLFlap' : 'walkRFlap') : isLeft ? 'walkL' : 'walkR'
+}
+
+// 文字在终端里占几列：中日韩文字和全角符号占 2 列
+function textWidth(text: string): number {
+  let n = 0
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0
+    const isWide =
+      (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
+      (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
+      (c >= 0xffe0 && c <= 0xffe6)
+    n += isWide ? 2 : 1
+  }
+  return n
 }
 
 // ---------- PR 真相：git 本地判断 + gh 轮询 ----------
@@ -273,6 +339,7 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       const now = await $.clock.now()
       await update($, workingSince, () => now)
+      await update($, flight, () => null)
       await ensureTicker($)
     }
     return next(e)
@@ -280,7 +347,14 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
+      const now = await $.clock.now()
+      const since = await read($, workingSince)
       await update($, workingSince, () => null)
+      // 走到哪儿都先飞回原位
+      if (since !== null) {
+        const walkedMs = now - since
+        await update($, flight, () => ({ walkedMs, at: now, ms: flyMs(walkedMs, lastMaxX) }))
+      }
       await update($, lastSeconds, () => Math.round(e.durationMs / 1000))
       if (e.reason === 'answer') await showFlash($, 'done')
       else await ensureTicker($)
@@ -341,25 +415,30 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.hasSurvey || (await read($, isHidden))) return next(e)
 
-    const frame = await read($, tick)
+    await read($, tick) // 订阅走帧：每一帧都重画；造型和位置按时间算
     const since = await read($, workingSince)
     const f = await read($, flash)
+    const fl = await read($, flight)
     const last = await read($, lastSeconds)
     const pr = await read($, branchPr)
     const lm = await read($, localMerge)
     const who = (await read($, pet)) ?? 'chick'
     const now = await $.clock.now()
     const activeFlash = f && now < f.until ? f.kind : null
+    const flying = fl !== null && now < fl.at + fl.ms
+    const beat = Math.floor(now / FAST_MS)
 
-    const pose: Pose = activeFlash
-      ? activeFlash
-      : since !== null
-        ? frame % 2 === 0 ? 'work1' : 'work2'
-        : 'mini'
+    const pose: Pose = flying
+      ? beat % 2 === 0 ? 'fly1' : 'fly2'
+      : activeFlash
+        ? activeFlash
+        : since !== null
+          ? walkPose(now - since)
+          : 'mini'
 
     const head =
       since !== null
-        ? `${SPIN[frame % SPIN.length]} 处理中 ${Math.max(0, Math.round((now - since) / 1000))}s`
+        ? `${SPIN[beat % SPIN.length]} 处理中 ${Math.max(0, Math.round((now - since) / 1000))}s`
         : activeFlash === 'done'
           ? `✓ 完成 ${last ?? 0}s`
           : activeFlash === 'open'
@@ -417,10 +496,22 @@ export const register: Register = on => {
       )
     }
 
+    // 处理中在这一行里走来走去，完成后飞回最右边；气泡居中跟着宠物，到边上就贴边
+    const columns = e.props.bodyColumns
+    const maxX = columns - W
+    lastMaxX = maxX
+    const x = flying ? flyX(fl, now, maxX) : since !== null ? walkX(now - since, maxX) : maxX
+    const bubbleWidth = textWidth(` ${head}${tags.map(([, label]) => ` · ${label}`).join('')} `)
+    const bubbleX = Math.max(0, Math.min(columns - bubbleWidth, x + BODY_CENTER - Math.floor(bubbleWidth / 2)))
+
     return (
-      <Box flexDirection="column" alignItems="flex-end">
-        {bubble}
-        {art}
+      <Box flexDirection="column">
+        <Box key="bubble-track" marginLeft={bubbleX}>
+          {bubble}
+        </Box>
+        <Box key="pet-track" marginLeft={x}>
+          {art}
+        </Box>
       </Box>
     )
   })
