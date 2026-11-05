@@ -2,6 +2,9 @@
 import type { Pet } from '../types'
 
 export const W = 21 // 2 左翼留白 + 14 身体 + 5 道具
+/** 身体从第几列开始、有多宽；走路的造型只裁出身体这一段，好让尘土贴着身体画 */
+export const BODY_LEFT = 2
+export const BODY_W = 14
 
 // 所有宠物共用的颜色（眼睛、道具）；各宠物的身体颜色在 SPECIES 里
 const SHARED: Record<string, number> = {
@@ -281,17 +284,14 @@ const WINGS_OUT: Px[] = [
 const MINI_Z: Px[] = [[0, 15, 'Z'], [0, 16, 'Z'], [1, 16, 'Z'], [2, 15, 'Z'], [2, 16, 'Z']]
 
 export type Pose =
-  | 'walkL' | 'walkR' | 'walkLFlap' | 'walkRFlap' | 'fly1' | 'fly2'
+  | 'walkL' | 'walkR' | 'fly1' | 'fly2'
   | 'done' | 'sleep' | 'open' | 'merged' | 'closed' | 'mini'
 
 function grids(s: Species): Record<Pose, string[]> {
   const sadTop: Rows = s.sadTop ? { 0: s.sadTop } : {}
   return {
-    // 边走边扇翅膀：抬左脚 / 抬右脚 × 翅膀收起 / 张开
     walkL: build(s.base, LIFT_LEFT),
     walkR: build(s.base, LIFT_RIGHT),
-    walkLFlap: build(s.base, [...blink(s.face), ...hideWings(s), ...WINGS_OUT, ...LIFT_LEFT]),
-    walkRFlap: build(s.base, [...blink(s.face), ...hideWings(s), ...WINGS_OUT, ...LIFT_RIGHT]),
     fly1: build(s.base, [...hideWings(s), ...WING_UP, ...TUCK_FEET]),
     fly2: build(s.base, [...blink(s.face), ...hideWings(s), ...WINGS_OUT, ...TUCK_FEET]),
     done: build(s.base, [...happy(s.face), ...SPARKLE]),
@@ -323,14 +323,15 @@ const SPACE = 0x20
 
 type Sprite = { columns: number; rows: number; cells: string }
 
-function pack(grid: string[], pal: Record<string, number>): Sprite {
-  const g = grid.length % 2 ? [...grid, '.'.repeat(W)] : grid
+// 从第 from 列起取 width 列打包
+function pack(grid: string[], pal: Record<string, number>, from = 0, width = W): Sprite {
+  const g = grid.length % 2 ? [...grid, '.'.repeat(from + width)] : grid
   const rows = g.length / 2
-  const words = new Uint32Array(W * rows * 3)
+  const words = new Uint32Array(width * rows * 3)
   let k = 0
   for (let r = 0; r < rows; r++) {
     const top = g[r * 2] ?? '', bot = g[r * 2 + 1] ?? ''
-    for (let c = 0; c < W; c++) {
+    for (let c = from; c < from + width; c++) {
       const t = pal[top.charAt(c)], b = pal[bot.charAt(c)]
       if (t !== undefined && b !== undefined) words.set([UPPER, t, b], k)
       else if (t !== undefined) words.set([UPPER, t, DEFAULT], k)
@@ -339,14 +340,36 @@ function pack(grid: string[], pal: Record<string, number>): Sprite {
       k += 3
     }
   }
-  return { columns: W, rows, cells: toBase64(new Uint8Array(words.buffer)) }
+  return { columns: width, rows, cells: toBase64(new Uint8Array(words.buffer)) }
 }
+
+const isWalk = (pose: string) => pose === 'walkL' || pose === 'walkR'
 
 export const SPRITES: Record<Pet, Record<Pose, Sprite>> = Object.fromEntries(
   PETS.map(pet => {
     const s: Species = SPECIES[pet]
     const pal = { ...SHARED, ...s.palette }
-    const poses = Object.entries(grids(s)).map(([pose, g]) => [pose, pack(g, pal)])
+    const poses = Object.entries(grids(s)).map(([pose, g]) => [
+      pose,
+      isWalk(pose) ? pack(g, pal, BODY_LEFT, BODY_W) : pack(g, pal),
+    ])
     return [pet, Object.fromEntries(poses)]
   }),
 ) as never
+
+// ---------- 尘土：走路时扬在身后，贴着脚的高度 ----------
+
+export const DUST_W = 4
+const DUST_PAL: Record<string, number> = { u: 0xb4a082, v: 0xe1d7c3 }
+// 尘土在身体右边（往左走）时的样子，靠身体的一侧在左；左边的是镜像。两帧：一团、散开
+const DUST_RIGHT = [
+  ['.uu.', 'uvvu'],
+  ['.v.u', 'u.v.'],
+]
+const mirror = (g: string[]) => g.map(r => [...r].reverse().join(''))
+
+export type DustSide = 'left' | 'right'
+export const DUST: Record<DustSide, Sprite[]> = {
+  right: DUST_RIGHT.map(g => pack(g, DUST_PAL, 0, DUST_W)),
+  left: DUST_RIGHT.map(g => pack(mirror(g), DUST_PAL, 0, DUST_W)),
+}

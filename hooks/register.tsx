@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
 
 import type { BranchPr, Flash, FlashKind, Flight, Pet, PrState } from '../types'
-import { PETS, SPECIES, SPRITES, W } from './sprites'
-import type { Pose } from './sprites'
+import { BODY_LEFT, DUST, DUST_W, PETS, SPECIES, SPRITES, W } from './sprites'
+import type { DustSide, Pose } from './sprites'
 
 const workingSince = atom({ plugin: 'chick-status', key: 'workingSince' } as const, null)
 const lastSeconds = atom({ plugin: 'chick-status', key: 'lastSeconds' } as const, null)
@@ -28,14 +28,10 @@ const FAST_MS = 200
 const SLOW_MS = 1000
 /** 走一格（一列）要多久 */
 const STEP_MS = 200
-/** 边走边扇翅膀：翅膀每隔多久扇一下 */
-const FLAP_MS = 600
 /** 飞回原位：每秒飞多少列，再限定最短、最长时间 */
 const FLY_COLUMNS_PER_S = 40
 const FLY_MIN_MS = 500
 const FLY_MAX_MS = 2500
-/** 宠物身体中心在精灵图里的列（左边留白 2 列 + 身体 14 列的一半） */
-const BODY_CENTER = 9
 
 /** 本地检查（git）的周期；GitHub 查询受 GH_TTL 限制 */
 const POLL_MS = 15_000
@@ -132,6 +128,13 @@ function walkX(walkedMs: number, maxX: number): number {
   return maxX - (steps <= maxX ? steps : 2 * maxX - steps)
 }
 
+// 正往哪边走：前半程往左，走到最左边之后往右
+function walkDir(walkedMs: number, maxX: number): DustSide {
+  if (maxX <= 0) return 'left'
+  const steps = Math.floor(walkedMs / STEP_MS) % (2 * maxX)
+  return steps < maxX ? 'left' : 'right'
+}
+
 // 飞多久：按离原位的距离算
 function flyMs(walkedMs: number, maxX: number): number {
   const distance = maxX - walkX(walkedMs, maxX)
@@ -147,25 +150,9 @@ function flyX(f: Flight, now: number, maxX: number): number {
   return Math.round(from + (maxX - from) * eased)
 }
 
-// 每走一步换一只脚，每 FLAP_MS 扇一下翅膀
+// 每走一步换一只脚
 function walkPose(walkedMs: number): Pose {
-  const isLeft = Math.floor(walkedMs / STEP_MS) % 2 === 0
-  const isFlap = Math.floor(walkedMs / FLAP_MS) % 2 === 1
-  return isFlap ? (isLeft ? 'walkLFlap' : 'walkRFlap') : isLeft ? 'walkL' : 'walkR'
-}
-
-// 文字在终端里占几列：中日韩文字和全角符号占 2 列
-function textWidth(text: string): number {
-  let n = 0
-  for (const ch of text) {
-    const c = ch.codePointAt(0) ?? 0
-    const isWide =
-      (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
-      (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
-      (c >= 0xffe0 && c <= 0xffe6)
-    n += isWide ? 2 : 1
-  }
-  return n
+  return Math.floor(walkedMs / STEP_MS) % 2 === 0 ? 'walkL' : 'walkR'
 }
 
 // ---------- PR 真相：git 本地判断 + gh 轮询 ----------
@@ -485,7 +472,53 @@ export const register: Register = on => {
     }
 
     const sprite = SPRITES[who][pose]
-    const art = <Raster key={`${who}-${pose}`} columns={W} rows={sprite.rows} cells={sprite.cells} />
+    const art = <Raster key={`${who}-${pose}`} columns={sprite.columns} rows={sprite.rows} cells={sprite.cells} />
+
+    const columns = e.props.bodyColumns
+    const maxX = columns - W
+    lastMaxX = maxX
+    const isWalking = since !== null && !flying && !activeFlash
+
+    // 处理中在下面一行走来走去，完成后飞回最右边；气泡固定在右边
+    if (since !== null || flying) {
+      const x = flying ? flyX(fl, now, maxX) : walkX(now - (since ?? now), maxX)
+      let track = (
+        <Box key="pet-track" marginLeft={x}>
+          {art}
+        </Box>
+      )
+      if (isWalking) {
+        // 走路的造型只有身体那一段；尘土扬在身后（和走的方向相反），左边放不下就不画
+        const walked = now - since
+        const side: DustSide = walkDir(walked, maxX) === 'left' ? 'right' : 'left'
+        const bodyX = x + BODY_LEFT
+        const hasDust = side === 'right' || bodyX >= DUST_W
+        const puff = DUST[side][Math.floor(walked / STEP_MS) % 2]
+        const dust = hasDust && puff && (
+          <Raster key={`dust-${side}`} columns={DUST_W} rows={puff.rows} cells={puff.cells} />
+        )
+        track = (
+          <Box
+            key="pet-track"
+            marginLeft={hasDust && side === 'left' ? bodyX - DUST_W : bodyX}
+            flexDirection="row"
+            alignItems="flex-end"
+          >
+            {side === 'left' && dust}
+            {art}
+            {side === 'right' && dust}
+          </Box>
+        )
+      }
+      return (
+        <Box flexDirection="column">
+          <Box key="bubble-row" flexDirection="row" justifyContent="flex-end">
+            {bubble}
+          </Box>
+          {track}
+        </Box>
+      )
+    }
 
     if (pose === 'mini') {
       return (
@@ -496,22 +529,10 @@ export const register: Register = on => {
       )
     }
 
-    // 处理中在这一行里走来走去，完成后飞回最右边；气泡居中跟着宠物，到边上就贴边
-    const columns = e.props.bodyColumns
-    const maxX = columns - W
-    lastMaxX = maxX
-    const x = flying ? flyX(fl, now, maxX) : since !== null ? walkX(now - since, maxX) : maxX
-    const bubbleWidth = textWidth(` ${head}${tags.map(([, label]) => ` · ${label}`).join('')} `)
-    const bubbleX = Math.max(0, Math.min(columns - bubbleWidth, x + BODY_CENTER - Math.floor(bubbleWidth / 2)))
-
     return (
-      <Box flexDirection="column">
-        <Box key="bubble-track" marginLeft={bubbleX}>
-          {bubble}
-        </Box>
-        <Box key="pet-track" marginLeft={x}>
-          {art}
-        </Box>
+      <Box flexDirection="column" alignItems="flex-end">
+        {bubble}
+        {art}
       </Box>
     )
   })

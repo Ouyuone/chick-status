@@ -312,36 +312,97 @@ test('隐藏时换宠物会让它重新出现', async ($, on) => {
   await ui.unmount()
 })
 
-// 原位在最右边：band 宽 100，宠物 21 列
+// 原位在最右边：band 宽 100，宠物 21 列（左边留白 2 列 + 身体 14 列 + 道具 5 列），尘土 4 列
 const HOME_X = 100 - 21
 
 type Found = { find: (q: never) => Promise<{ props: Record<string, unknown> } | undefined> }
 
-// 宠物、气泡离左边多少列；没有这一行时返回 undefined
+// 某一行离左边多少列；没有这一行时返回 undefined
 async function trackX(ui: Found, key = 'pet-track') {
   const track = await ui.find({ key } as never)
   return track ? Number(track.props.marginLeft) : undefined
 }
 
-test('处理中在屏幕上走来走去，到头折返', async ($, on) => {
+// 小鸡现在是哪个走路造型（尘土也是 Raster，不能只找第一个）
+async function walkPoseOf(ui: Found) {
+  for (const pose of ['walkL', 'walkR']) {
+    if (await ui.find({ type: 'Raster', key: `chick-${pose}` } as never)) return pose
+  }
+  return undefined
+}
+
+async function dustSide(ui: Found) {
+  for (const side of ['left', 'right']) {
+    if (await ui.find({ type: 'Raster', key: `dust-${side}` } as never)) return side
+  }
+  return undefined
+}
+
+test('处理中在屏幕上走来走去，到头折返，尘土扬在身后', async ($, on) => {
   const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
   await $.turn.start({ text: 'hi', turnId: 't1' })
-  await clock.advance(2000) // 每 200ms 走一列：走了 10 列
+  await clock.advance(2000) // 每 200ms 走一列：往左走了 10 列
   let ui = await $.ui.mount(BAND)
-  expect(await trackX(ui)).toBe(HOME_X - 10)
-  expect((await rasterKey(ui)).split('-')[1]).toMatch(/^walk[LR](Flap)?$/)
+  expect(await walkPoseOf(ui)).toBeDefined()
+  expect(await dustSide(ui)).toBe('right') // 往左走，尘土在右边
+  expect(await trackX(ui)).toBe(HOME_X - 10 + 2) // 走路时这一行从身体开始
   expect(await text(ui)).toContain('处理中')
-  // 气泡 " ⠋ 处理中 2s " 宽 13 列（汉字占 2 列），居中对准宠物身体
-  expect(await trackX(ui, 'bubble-track')).toBe(HOME_X - 10 + 9 - 6)
   await ui.unmount()
 
   // 走到最左边（79 列，15.8 秒）再往回走 5 列
   await clock.advance((HOME_X + 5) * 200 - 2000)
   ui = await $.ui.mount(BAND)
-  expect(await trackX(ui)).toBe(5)
+  expect(await dustSide(ui)).toBe('left') // 往右走，尘土在左边
+  expect(await trackX(ui)).toBe(5 + 2 - 4) // 这一行从尘土开始
+  await ui.unmount()
+})
+
+test('贴着左边往回走时，左边放不下尘土就不画', async ($, on) => {
+  const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await clock.advance((HOME_X + 1) * 200) // 离左边 1 列，正往右走
+  const ui = await $.ui.mount(BAND)
+  expect(await dustSide(ui)).toBeUndefined()
+  expect(await walkPoseOf(ui)).toBeDefined()
+  expect(await trackX(ui)).toBe(1 + 2)
+  await ui.unmount()
+})
+
+test('走路只换脚，不扇翅膀', async ($, on) => {
+  const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+
+  const seen: Array<string | undefined> = []
+  let prev = 0
+  for (const at of [0, 200, 400, 600]) {
+    await clock.advance(at - prev)
+    prev = at
+    const ui = await $.ui.mount(BAND)
+    seen.push(await walkPoseOf(ui))
+    await ui.unmount()
+  }
+  expect(seen).toEqual(['walkL', 'walkR', 'walkL', 'walkR'])
+})
+
+test('气泡固定在右边，不跟着宠物走', async ($, on) => {
+  const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await clock.advance(6000)
+  const ui = await $.ui.mount(BAND)
+  const row = await ui.find({ key: 'bubble-row' } as never)
+  expect(row?.props.justifyContent).toBe('flex-end')
+  expect(row?.props.marginLeft).toBeUndefined()
   await ui.unmount()
 })
 
@@ -359,19 +420,20 @@ test('完成时从当前位置飞回原位，落地后才开心', async ($, on) 
 
   let ui = await $.ui.mount(BAND)
   expect((await rasterKey(ui)).split('-')[1]).toMatch(/^fly[12]$/)
+  expect(await dustSide(ui)).toBeUndefined() // 飞的时候没有尘土
   expect(await trackX(ui)).toBe(HOME_X - 40)
   await ui.unmount()
 
   await clock.advance(500) // 离原位 40 列，每秒 40 列：飞 1 秒，现在飞到一半多（先快后慢）
   ui = await $.ui.mount(BAND)
-  const mid = await trackX(ui)
+  const mid = await trackX(ui) ?? 0
   expect(mid).toBeGreaterThan(HOME_X - 40)
   expect(mid).toBeLessThan(HOME_X)
   await ui.unmount()
 
-  await clock.advance(600) // 落地
+  await clock.advance(600) // 落地：回到原来的布局
   ui = await $.ui.mount(BAND)
-  expect(await trackX(ui)).toBe(HOME_X)
+  expect(await trackX(ui)).toBeUndefined()
   expect(await ui.find({ type: 'Raster', key: 'chick-done' })).toBeDefined()
   expect(await text(ui)).toContain('完成 8s')
   await ui.unmount()
@@ -396,24 +458,6 @@ test('中途打断也飞回原位，然后睡觉', async ($, on) => {
   ui = await $.ui.mount(BAND)
   expect(await ui.find({ type: 'Raster', key: 'chick-mini' })).toBeDefined()
   await ui.unmount()
-})
-
-test('边走边扇翅膀：每步换脚，每 0.6 秒扇一下', async ($, on) => {
-  const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await $.turn.start({ text: 'hi', turnId: 't1' })
-
-  const seen: string[] = []
-  let prev = 0
-  for (const at of [0, 200, 600, 800, 1200]) {
-    await clock.advance(at - prev)
-    prev = at
-    const ui = await $.ui.mount(BAND)
-    seen.push((await rasterKey(ui)).split('-')[1] ?? '')
-    await ui.unmount()
-  }
-  expect(seen).toEqual(['walkL', 'walkR', 'walkRFlap', 'walkLFlap', 'walkL'])
 })
 
 type Band = Parameters<Parameters<TestBody>[0]['ui']['mount']>[0]
@@ -463,20 +507,4 @@ test('飞回时间按距离算：再远也最多飞 2.5 秒', async ($, on) => {
   expect(await isFlying($, WIDE)).toBe(true)
   await clock.advance(200)
   expect(await isFlying($, WIDE)).toBe(false)
-})
-
-test('气泡太宽时贴着右边，不会出界', async ($, on) => {
-  const clock = engine(on, {
-    branch: 'feature/x', gh: '[{"state":"OPEN","number":12}]', mergedIntoDev: true,
-  })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await clock.advance(20)
-  await $.turn.start({ text: 'hi', turnId: 't1' })
-
-  // " ⠋ 处理中 0s · ● #12 open · ◆ 已并入 dev " 宽 41 列
-  const ui = await $.ui.mount(BAND)
-  expect(await trackX(ui)).toBe(HOME_X)
-  expect(await trackX(ui, 'bubble-track')).toBe(100 - 41)
-  await ui.unmount()
 })
