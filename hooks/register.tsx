@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
 
-import type { BranchPr, Flash, FlashKind, PrState } from '../types'
-import { SPRITES, W } from './sprites'
+import type { BranchPr, Flash, FlashKind, Pet, PrState } from '../types'
+import { PETS, SPECIES, SPRITES, W } from './sprites'
 import type { Pose } from './sprites'
 
 const workingSince = atom({ plugin: 'chick-status', key: 'workingSince' } as const, null)
@@ -12,8 +12,12 @@ const branchPr = atom({ plugin: 'chick-status', key: 'branchPr' } as const, null
 const localMerge = atom({ plugin: 'chick-status', key: 'localMerge' } as const, null)
 const tick = atom({ plugin: 'chick-status', key: 'tick' } as const, 0)
 const isHidden = atom({ plugin: 'chick-status', key: 'isHidden' } as const, false)
+const pet = atom({ plugin: 'chick-status', key: 'pet' } as const, null)
 
 const STORE_HIDDEN = 'hidden'
+/** 固定的宠物；没有这个键就每次会话随机 */
+const STORE_PET = 'pet'
+const RANDOM_WORDS = ['random', '随机']
 const FLASH_MS: Record<FlashKind, number> = { done: 5000, open: 3000, merged: 3000, closed: 3000 }
 const MIN_COLUMNS = 40
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -37,6 +41,25 @@ let ticker: Timer | undefined
 let poller: Timer | undefined
 let isRefreshing = false
 let isForcePending = false
+
+// ---------- 宠物 ----------
+
+function randomPet(): Pet {
+  const [n = 0] = crypto.getRandomValues(new Uint32Array(1))
+  return PETS[n % PETS.length] ?? 'chick'
+}
+
+// 英文名或中文名都认
+function parsePet(word: string): Pet | undefined {
+  const w = word.toLowerCase()
+  return PETS.find(p => p === w || SPECIES[p].name === word)
+}
+
+async function petName($: Dollar): Promise<string> {
+  return SPECIES[(await read($, pet)) ?? 'chick'].name
+}
+
+const PET_LIST = PETS.map(p => `${SPECIES[p].name}（${p}）`).join('、')
 
 // ---------- 动画 ----------
 
@@ -205,10 +228,14 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'chick',
-      description: '小鸡状态：/chick 显示或隐藏',
+      description: '宠物状态：/chick 显示或隐藏，/chick <宠物> 换宠物，/chick 随机',
+      argumentHint: '[小鸡|小鸭|企鹅|猫头鹰|鹦鹉|随机]',
     })
     const hidden = (await $.store.get(STORE_HIDDEN)) === true
     await update($, isHidden, () => hidden)
+    // 固定了就用固定的；随机模式下本次会话已经选过就不换（插件热重载也会触发 session.start）
+    const fixed = parsePet(String((await $.store.get(STORE_PET)) ?? ''))
+    await update($, pet, cur => fixed ?? cur ?? randomPet())
     await ensureTicker($)
     startPoller($)
     return next(e)
@@ -219,11 +246,27 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'chick' }, async $ => {
-    const hidden = !(await read($, isHidden))
-    await update($, isHidden, () => hidden)
-    await $.store.set(STORE_HIDDEN, hidden)
-    return { text: hidden ? '小鸡已隐藏，/chick 再次显示。' : '小鸡回来了。' }
+  on('command.run', { command: 'chick' }, async ($, e) => {
+    const arg = e.args.trim()
+    if (!arg) {
+      const hidden = !(await read($, isHidden))
+      await update($, isHidden, () => hidden)
+      await $.store.set(STORE_HIDDEN, hidden)
+      const name = await petName($)
+      return { text: hidden ? `${name}已隐藏，/chick 再次显示。` : `${name}回来了。` }
+    }
+
+    const isRandom = RANDOM_WORDS.includes(arg.toLowerCase())
+    const chosen = isRandom ? randomPet() : parsePet(arg)
+    if (!chosen) return { text: `没有叫"${arg}"的宠物。可选：${PET_LIST}，或者"随机"。` }
+    if (isRandom) await $.store.delete(STORE_PET)
+    else await $.store.set(STORE_PET, chosen)
+    await update($, pet, () => chosen)
+    // 换宠物顺便让它出来
+    await update($, isHidden, () => false)
+    await $.store.set(STORE_HIDDEN, false)
+    const name = SPECIES[chosen].name
+    return { text: isRandom ? `已切换为随机模式，这次来的是${name}，以后每次会话随机。` : `换成${name}了。` }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -304,6 +347,7 @@ export const register: Register = on => {
     const last = await read($, lastSeconds)
     const pr = await read($, branchPr)
     const lm = await read($, localMerge)
+    const who = (await read($, pet)) ?? 'chick'
     const now = await $.clock.now()
     const activeFlash = f && now < f.until ? f.kind : null
 
@@ -361,8 +405,8 @@ export const register: Register = on => {
       )
     }
 
-    const sprite = SPRITES[pose]
-    const art = <Raster key={`chick-${pose}`} columns={W} rows={sprite.rows} cells={sprite.cells} />
+    const sprite = SPRITES[who][pose]
+    const art = <Raster key={`${who}-${pose}`} columns={W} rows={sprite.rows} cells={sprite.cells} />
 
     if (pose === 'mini') {
       return (

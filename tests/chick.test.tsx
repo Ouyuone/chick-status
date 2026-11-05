@@ -19,11 +19,25 @@ type On = Parameters<TestBody>[1]
 type Run = { exitCode: number; stdout: string }
 
 // 假仓库：分支名、gh 返回、候选分支列表、本地是否已合并进候选分支都可在测试中改
-type Repo = { branch: string | null; gh: string; mergedIntoDev: boolean; refs?: string }
+// store 是跨会话存储的初始内容，默认固定成小鸡
+type Repo = {
+  branch: string | null; gh: string; mergedIntoDev: boolean; refs?: string
+  store?: Record<string, unknown>
+}
 
 function engine(on: On, repo: Repo) {
   const clock = mock.clock(on, { now: 1_000_000 })
-  mock.store(on)
+  // 跨会话存储放在 repo.store 里，测试直接检查写进去的值
+  const store = (repo.store ??= { pet: 'chick' })
+  on('store.get', (_, e) => ({ value: store[e.key] }))
+  on('store.set', (_, e) => {
+    store[e.key] = e.value
+    return { value: undefined }
+  })
+  on('store.delete', (_, e) => {
+    delete store[e.key]
+    return { value: undefined }
+  })
   on('command.register', () => ({ value: { command: 'chick' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repo' }))
@@ -201,5 +215,98 @@ test('终端太窄只显示文字', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 30 } })
   expect(await ui.find({ type: 'Raster' })).toBeUndefined()
   expect(await text(ui)).toContain('zzZ')
+  await ui.unmount()
+})
+
+const PET_KEYS = ['chick', 'duck', 'penguin', 'owl', 'parrot']
+
+// 模拟在输入框里敲 /chick <args>
+function chick($: Parameters<TestBody>[0], args: string) {
+  return $.command.run({
+    command: 'chick', args,
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 100 },
+  })
+}
+
+async function rasterKey(ui: { find: (q: never) => Promise<{ key?: string } | undefined> }) {
+  return (await ui.find({ type: 'Raster' } as never))?.key ?? ''
+}
+
+test('没设置过宠物：每次会话随机来一只', async ($, on) => {
+  const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false, store: {} })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  const ui = await $.ui.mount(BAND)
+  const [who, pose] = (await rasterKey(ui)).split('-')
+  expect(PET_KEYS).toContain(who)
+  expect(pose).toBe('mini')
+  await ui.unmount()
+})
+
+test('/chick 企鹅：换成企鹅并记住，英文名也认', async ($, on) => {
+  const repo: Repo = { branch: null, gh: '[]', mergedIntoDev: false }
+  const clock = engine(on, repo)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  let r = await chick($, '企鹅')
+  expect(r.text).toContain('企鹅')
+  let ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Raster', key: 'penguin-mini' })).toBeDefined()
+  await ui.unmount()
+  expect(repo.store?.pet).toBe('penguin')
+
+  r = await chick($, 'Owl')
+  expect(r.text).toContain('猫头鹰')
+  ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Raster', key: 'owl-mini' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/chick 随机：清掉固定的宠物', async ($, on) => {
+  const repo: Repo = { branch: null, gh: '[]', mergedIntoDev: false, store: { pet: 'duck' } }
+  const clock = engine(on, repo)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  let ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Raster', key: 'duck-mini' })).toBeDefined()
+  await ui.unmount()
+
+  const r = await chick($, '随机')
+  expect(r.text).toContain('随机')
+  expect(repo.store?.pet).toBeUndefined()
+  ui = await $.ui.mount(BAND)
+  expect(PET_KEYS).toContain((await rasterKey(ui)).split('-')[0])
+  await ui.unmount()
+})
+
+test('/chick 不认识的名字：列出可选项，不改设置', async ($, on) => {
+  const repo: Repo = { branch: null, gh: '[]', mergedIntoDev: false }
+  const clock = engine(on, repo)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  const r = await chick($, '恐龙')
+  expect(r.text).toContain('鹦鹉')
+  expect(repo.store?.pet).toBe('chick')
+})
+
+test('隐藏时换宠物会让它重新出现', async ($, on) => {
+  const repo: Repo = { branch: null, gh: '[]', mergedIntoDev: false }
+  const clock = engine(on, repo)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  const r = await chick($, '')
+  expect(r.text).toContain('小鸡已隐藏')
+  expect(repo.store?.hidden).toBe(true)
+
+  await chick($, '鹦鹉')
+  expect(repo.store?.hidden).toBe(false)
+  const ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Raster', key: 'parrot-mini' })).toBeDefined()
   await ui.unmount()
 })

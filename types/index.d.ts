@@ -1,5 +1,8 @@
 export type PrState = 'open' | 'merged' | 'closed'
 
+/** 可选的宠物 */
+export type Pet = 'chick' | 'duck' | 'penguin' | 'owl' | 'parrot'
+
 export type FlashKind = 'done' | PrState
 
 export type Flash = { kind: FlashKind; until: number }
@@ -29,6 +32,8 @@ declare module 'claude-code' {
       /** 动画帧计数，每秒 +1 */
       tick: number
       isHidden: boolean
+      /** 本次会话的宠物；null = 还没定（会话开始时按 /chick 的设置或随机选） */
+      pet: Pet | null
     }
   }
 }
