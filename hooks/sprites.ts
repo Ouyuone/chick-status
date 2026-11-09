@@ -214,6 +214,43 @@ export const SPECIES = {
       'DGPPGGAAGGPPGD',
     ],
   },
+  alphaq: {
+    name: 'alphaQ',
+    face: 'W',
+    body: 'U',
+    palette: {
+      D: 0x5e53df, // 旗杆
+      Y: 0xffcb24, // 黄
+      O: 0xfd9d6a, // 橙
+      U: 0x7c4bde, // 紫
+      V: 0x3f5ce0, // 蓝
+      I: 0x5e53df, // 底下的横条，分成两段当脚
+      W: 0xf5f5fa, // Q 中间的脸
+      E: 0xffcb24, // 能量火花（代替翅膀）
+      A: 0x2b2370, // 嘴
+      P: 0xfa968c,
+    },
+    base: [
+      '....YYYYOO....', // 0 Q 的圆环：左上黄，往右下渐变成橙、紫、蓝
+      '..YYYYOOOOUU..',
+      '.YYYWWWWWWOUU.',
+      '.YYWWWWWWWWUU.',
+      'YYWHKWWWWHKWUU', // 4 眼
+      'YOWKKWWWWKKWUU',
+      'OOWPWWAAWWPWUV', // 6 腮红 + 嘴
+      '.OUWWWWWWWWUVV',
+      '..UUUWWWWUUVVV',
+      '....UUUUVVVVVV', // 9 右下角的方尾巴
+      '..............',
+      '.IIIII..IIIII.', // 11 横条当脚
+    ],
+    mini: [
+      '....YYYYOO....',
+      '..YYYYOOOOUU..',
+      '.YYWKKWWKKWUU.',
+      'YYWPWWAAWWPWUU',
+    ],
+  },
 } satisfies Record<Pet, Species>
 
 export const PETS = Object.keys(SPECIES) as Pet[]

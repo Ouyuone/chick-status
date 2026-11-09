@@ -73,7 +73,11 @@ async function petName($: Dollar): Promise<string> {
   return SPECIES[(await read($, pet)) ?? 'chick'].name
 }
 
-const PET_LIST = PETS.map(p => `${SPECIES[p].name}（${p}）`).join('、')
+// 英文名和显示名只差大小写时（alphaQ）不重复写
+const PET_LIST = PETS.map(p => {
+  const name = SPECIES[p].name
+  return name.toLowerCase() === p ? name : `${name}（${p}）`
+}).join('、')
 
 // ---------- 动画 ----------
 
@@ -282,7 +286,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'chick',
       description: '宠物状态：/chick 显示或隐藏，/chick <宠物> 换宠物，/chick 随机',
-      argumentHint: '[小鸡|小鸭|企鹅|猫头鹰|鹦鹉|随机]',
+      argumentHint: '[小鸡|小鸭|企鹅|猫头鹰|鹦鹉|alphaQ|随机]',
     })
     const hidden = (await $.store.get(STORE_HIDDEN)) === true
     await update($, isHidden, () => hidden)

@@ -1,7 +1,7 @@
 export type PrState = 'open' | 'merged' | 'closed'
 
 /** 可选的宠物 */
-export type Pet = 'chick' | 'duck' | 'penguin' | 'owl' | 'parrot'
+export type Pet = 'chick' | 'duck' | 'penguin' | 'owl' | 'parrot' | 'alphaq'
 
 export type FlashKind = 'done' | PrState
 

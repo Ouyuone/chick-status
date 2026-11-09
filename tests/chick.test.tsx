@@ -219,7 +219,7 @@ test('终端太窄只显示文字', async ($, on) => {
   await ui.unmount()
 })
 
-const PET_KEYS = ['chick', 'duck', 'penguin', 'owl', 'parrot']
+const PET_KEYS = ['chick', 'duck', 'penguin', 'owl', 'parrot', 'alphaq']
 
 // 模拟在输入框里敲 /chick <args>
 function chick($: Parameters<TestBody>[0], args: string) {
@@ -507,4 +507,31 @@ test('飞回时间按距离算：再远也最多飞 2.5 秒', async ($, on) => {
   expect(await isFlying($, WIDE)).toBe(true)
   await clock.advance(200)
   expect(await isFlying($, WIDE)).toBe(false)
+})
+
+test('/chick alphaQ：换成 alphaQ，大小写都认', async ($, on) => {
+  const repo: Repo = { branch: null, gh: '[]', mergedIntoDev: false }
+  const clock = engine(on, repo)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  for (const typed of ['alphaQ', 'ALPHAQ', 'alphaq']) {
+    await chick($, '小鸡')
+    const r = await chick($, typed)
+    expect(r.text).toContain('alphaQ')
+    expect(repo.store?.pet).toBe('alphaq')
+  }
+  const ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Raster', key: 'alphaq-mini' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('不认识的名字：可选项里有 alphaQ，不重复写英文名', async ($, on) => {
+  const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+
+  const r = await chick($, '恐龙')
+  expect(r.text).toContain('、alphaQ')
+  expect(r.text).not.toContain('alphaQ（alphaq）')
 })
