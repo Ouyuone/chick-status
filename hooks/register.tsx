@@ -1,14 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
 
-import type { BranchPr, Flash, FlashKind, Flight, Pet, PrState } from '../types'
-import { DUST, DUST_W, PETS, SPECIES, SPRITES, TINY_LEFT, W } from './sprites'
-import type { DustSide, Pose } from './sprites'
+import type { BranchPr, Flash, FlashKind, Pet, PrState } from '../types'
+import { DANCE, PETS, SPECIES, SPRITES } from './sprites'
+import type { Pose } from './sprites'
 
 const workingSince = atom({ plugin: 'chick-status', key: 'workingSince' } as const, null)
 const lastSeconds = atom({ plugin: 'chick-status', key: 'lastSeconds' } as const, null)
 const flash = atom({ plugin: 'chick-status', key: 'flash' } as const, null)
-const flight = atom({ plugin: 'chick-status', key: 'flight' } as const, null)
 const branchPr = atom({ plugin: 'chick-status', key: 'branchPr' } as const, null)
 const localMerge = atom({ plugin: 'chick-status', key: 'localMerge' } as const, null)
 const tick = atom({ plugin: 'chick-status', key: 'tick' } as const, 0)
@@ -23,15 +22,9 @@ const FLASH_MS: Record<FlashKind, number> = { done: 5000, open: 3000, merged: 30
 const MIN_COLUMNS = 40
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 
-/** 走路、飞行时每帧的间隔；只有临时造型时每秒一帧 */
-const FAST_MS = 200
+/** 跳舞时每个舞步的时长，也是这时的帧间隔；只有临时造型时每秒一帧 */
+const FAST_MS = 250
 const SLOW_MS = 1000
-/** 走一格（一列）要多久 */
-const STEP_MS = 200
-/** 飞回原位：每秒飞多少列，再限定最短、最长时间 */
-const FLY_COLUMNS_PER_S = 40
-const FLY_MIN_MS = 500
-const FLY_MAX_MS = 2500
 
 /** 本地检查（git）的周期；GitHub 查询受 GH_TTL 限制 */
 const POLL_MS = 15_000
@@ -52,8 +45,6 @@ type Dollar = EngineInterface
 
 let ticker: Timer | undefined
 let tickerMs = 0
-/** 最近一次画的时候小号的原位（最远能走到哪一列）；起飞时用来算飞多远 */
-let lastMaxX = 79
 let poller: Timer | undefined
 let isRefreshing = false
 let isForcePending = false
@@ -85,10 +76,10 @@ const PET_LIST = PETS.map(p => {
 
 // ---------- 动画 ----------
 
-// 走路、飞行时快速走帧，只有临时造型时每秒一帧，都没有就停表
+// 跳舞时快速走帧，只有临时造型时每秒一帧，都没有就停表
 async function ensureTicker($: Dollar) {
-  const moving = (await read($, workingSince)) !== null || (await read($, flight)) !== null
-  const ms = moving ? FAST_MS : (await read($, flash)) !== null ? SLOW_MS : 0
+  const isDancing = (await read($, workingSince)) !== null
+  const ms = isDancing ? FAST_MS : (await read($, flash)) !== null ? SLOW_MS : 0
   if (ms === tickerMs) return
   ticker?.cancel()
   ticker = ms ? $.clock.every(ms, () => void onTick($)) : undefined
@@ -99,8 +90,6 @@ async function onTick($: Dollar) {
   const now = await $.clock.now()
   const f = await read($, flash)
   if (f && now >= f.until) await update($, flash, () => null)
-  const fl = await read($, flight)
-  if (fl && now >= fl.at + fl.ms) await update($, flight, () => null)
   await update($, tick, n => n + 1)
   await ensureTicker($)
 }
@@ -138,44 +127,14 @@ async function resetSession($: Dollar) {
   await update($, workingSince, () => null)
   await update($, lastSeconds, () => null)
   await update($, flash, () => null)
-  await update($, flight, () => null)
   await ensureTicker($)
 }
 
-// ---------- 走动 ----------
+// ---------- 跳舞 ----------
 
-// 走了 walkedMs 之后离左边多少列：从最右边的原位出发往左走，到头折返
-function walkX(walkedMs: number, maxX: number): number {
-  if (maxX <= 0) return 0
-  const steps = Math.floor(walkedMs / STEP_MS) % (2 * maxX)
-  return maxX - (steps <= maxX ? steps : 2 * maxX - steps)
-}
-
-// 正往哪边走：前半程往左，走到最左边之后往右
-function walkDir(walkedMs: number, maxX: number): DustSide {
-  if (maxX <= 0) return 'left'
-  const steps = Math.floor(walkedMs / STEP_MS) % (2 * maxX)
-  return steps < maxX ? 'left' : 'right'
-}
-
-// 飞多久：按离原位的距离算
-function flyMs(walkedMs: number, maxX: number): number {
-  const distance = maxX - walkX(walkedMs, maxX)
-  const ms = (distance / FLY_COLUMNS_PER_S) * 1000
-  return Math.round(Math.min(FLY_MAX_MS, Math.max(FLY_MIN_MS, ms)))
-}
-
-// 飞回原位：从起飞点先快后慢地飞到最右边
-function flyX(f: Flight, now: number, maxX: number): number {
-  const from = walkX(f.walkedMs, maxX)
-  const p = Math.min(1, Math.max(0, (now - f.at) / f.ms))
-  const eased = 1 - (1 - p) ** 2
-  return Math.round(from + (maxX - from) * eased)
-}
-
-// 每走一步换一只脚
-function walkPose(walkedMs: number): Pose {
-  return Math.floor(walkedMs / STEP_MS) % 2 === 0 ? 'walkL' : 'walkR'
+// 跳了 ms 之后是哪个舞步
+function dancePose(ms: number): Pose {
+  return DANCE[Math.floor(ms / FAST_MS) % DANCE.length] ?? 'dance1'
 }
 
 // ---------- PR 真相：git 本地判断 + gh 轮询 ----------
@@ -350,7 +309,6 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       const now = await $.clock.now()
       await update($, workingSince, () => now)
-      await update($, flight, () => null)
       await ensureTicker($)
     }
     return next(e)
@@ -358,14 +316,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
-      const now = await $.clock.now()
-      const since = await read($, workingSince)
       await update($, workingSince, () => null)
-      // 走到哪儿都先飞回原位
-      if (since !== null) {
-        const walkedMs = now - since
-        await update($, flight, () => ({ walkedMs, at: now, ms: flyMs(walkedMs, lastMaxX) }))
-      }
       await update($, lastSeconds, () => Math.round(e.durationMs / 1000))
       if (e.reason === 'answer') await showFlash($, 'done')
       else await ensureTicker($)
@@ -426,10 +377,9 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.hasSurvey || (await read($, isHidden))) return next(e)
 
-    await read($, tick) // 订阅走帧：每一帧都重画；造型和位置按时间算
+    await read($, tick) // 订阅走帧：每一帧都重画；造型按时间算
     const since = await read($, workingSince)
     const f = await read($, flash)
-    const fl = await read($, flight)
     const last = await read($, lastSeconds)
     const pr = await read($, branchPr)
     const lm = await read($, localMerge)
@@ -437,16 +387,9 @@ export const register: Register = on => {
     lastPet = who
     const now = await $.clock.now()
     const activeFlash = f && now < f.until ? f.kind : null
-    const flying = fl !== null && now < fl.at + fl.ms
     const beat = Math.floor(now / FAST_MS)
-
-    const pose: Pose = flying
-      ? beat % 2 === 0 ? 'fly1' : 'fly2'
-      : activeFlash
-        ? activeFlash
-        : since !== null
-          ? walkPose(now - since)
-          : 'mini'
+    // 临时造型优先；处理中原地跳舞；都没有就睡觉
+    const pose: Pose = activeFlash ?? (since !== null ? dancePose(now - since) : 'mini')
 
     const head =
       since !== null
@@ -497,68 +440,11 @@ export const register: Register = on => {
     }
 
     const sprite = SPRITES[who][pose]
-    const art = <Raster key={`${who}-${pose}`} columns={sprite.columns} rows={sprite.rows} cells={sprite.cells} />
-
-    const columns = e.props.bodyColumns
-    // 小号的原位：和右边大图的身体居中对齐
-    const maxX = columns - W + TINY_LEFT
-    lastMaxX = maxX
-    const isWalking = since !== null && !flying && !activeFlash
-
-    // 处理中缩成小号在下面一行走来走去，完成后飞回原位；气泡固定在右边
-    if (since !== null || flying) {
-      const x = flying ? flyX(fl, now, maxX) : walkX(now - (since ?? now), maxX)
-      // 处理中途来了 PR 动画：这几秒用大图，身体仍对着小号的位置
-      let track = (
-        <Box key="pet-track" marginLeft={flying ? x : Math.max(0, x - TINY_LEFT)}>
-          {art}
-        </Box>
-      )
-      if (isWalking) {
-        // 尘土扬在身后（和走的方向相反），左边放不下就不画
-        const walked = now - since
-        const side: DustSide = walkDir(walked, maxX) === 'left' ? 'right' : 'left'
-        const hasDust = side === 'right' || x >= DUST_W
-        const puff = DUST[side][Math.floor(walked / STEP_MS) % 2]
-        const dust = hasDust && puff && (
-          <Raster key={`dust-${side}`} columns={DUST_W} rows={puff.rows} cells={puff.cells} />
-        )
-        track = (
-          <Box
-            key="pet-track"
-            marginLeft={hasDust && side === 'left' ? x - DUST_W : x}
-            flexDirection="row"
-            alignItems="flex-end"
-          >
-            {side === 'left' && dust}
-            {art}
-            {side === 'right' && dust}
-          </Box>
-        )
-      }
-      return (
-        <Box flexDirection="column">
-          <Box key="bubble-row" flexDirection="row" justifyContent="flex-end">
-            {bubble}
-          </Box>
-          {track}
-        </Box>
-      )
-    }
-
-    if (pose === 'mini') {
-      return (
-        <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end">
-          {bubble}
-          {art}
-        </Box>
-      )
-    }
-
+    // 气泡在左、宠物在右，底部对齐；跳舞和完成一样大，处理中到完成高度不变
     return (
-      <Box flexDirection="column" alignItems="flex-end">
+      <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end">
         {bubble}
-        {art}
+        <Raster key={`${who}-${pose}`} columns={sprite.columns} rows={sprite.rows} cells={sprite.cells} />
       </Box>
     )
   })

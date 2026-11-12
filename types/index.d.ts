@@ -7,9 +7,6 @@ export type FlashKind = 'done' | PrState
 
 export type Flash = { kind: FlashKind; until: number }
 
-/** 处理完成后飞回原位：起飞时已经走了多久（ms，用来算起点）、起飞时刻、要飞多久（ms） */
-export type Flight = { walkedMs: number; at: number; ms: number }
-
 /** 当前分支在 GitHub 上最新一个 PR 的状态（gh pr list 轮询所得） */
 export type BranchPr = {
   branch: string
@@ -30,8 +27,6 @@ declare module 'claude-code' {
       lastSeconds: number | null
       /** 临时造型（完成 / PR 事件），到期自动清除 */
       flash: Flash | null
-      /** 正在飞回原位，飞到了清成 null */
-      flight: Flight | null
       branchPr: BranchPr | null
       localMerge: LocalMerge | null
       /** 动画帧计数，每秒 +1 */

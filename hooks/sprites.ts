@@ -2,10 +2,6 @@
 import type { Pet } from '../types'
 
 export const W = 19 // 14 身体 + 5 道具
-/** 走路、飞回原位用的小号：4 行 × 6 列，在终端里只占 2 行 */
-export const TINY_W = 6
-/** 小号对齐大图身体（第 0–13 列）的中间，从小号换回大图时位置不跳 */
-export const TINY_LEFT = (14 - TINY_W) / 2
 
 // 所有宠物共用的颜色（眼睛、道具）；各宠物的身体颜色在 SPECIES 里
 const SHARED: Record<string, number> = {
@@ -32,8 +28,6 @@ type Species = {
   base: string[]
   /** 睡觉时的迷你版，4 行 */
   mini: string[]
-  /** 走路、飞回原位用的小号，4 行 × 6 列：第 1 行是眼睛，翅膀只用 `E` 放在第 2 行，第 3 行是脚 */
-  tiny: string[]
   face: string
   body: string
   /** 难过时替换第 0 行（呆毛耷拉） */
@@ -75,12 +69,6 @@ export const SPECIES = {
       '.DYKKYAAYKKYD.',
       'DYPPYYAAYYPPYD',
     ],
-    tiny: [
-      '.YYYY.',
-      'YKAAKY',
-      'EPYYPE',
-      '.A..A.',
-    ],
   },
   duck: {
     name: '小鸭',
@@ -116,12 +104,6 @@ export const SPECIES = {
       '.DYKKYAAYKKYD.',
       'DYPPAAAAAAPPYD',
     ],
-    tiny: [
-      '.YYYY.',
-      'YKYYKY',
-      'EAAAAE',
-      'AA..AA',
-    ],
   },
   penguin: {
     name: '企鹅',
@@ -155,12 +137,6 @@ export const SPECIES = {
       '..DDDDDDDDDD..',
       '.DNKKWAAWKKND.',
       'DNNPWWAAWWPNND',
-    ],
-    tiny: [
-      '.DNND.',
-      'DKWWKD',
-      'EWAAWE',
-      '.A..A.',
     ],
   },
   owl: {
@@ -196,12 +172,6 @@ export const SPECIES = {
       '.DDDDDDDDDDDD.',
       '.DTKKTAATKKTD.',
       'DGGTTTAATTTGGD',
-    ],
-    tiny: [
-      'DGGGGD',
-      'TKAAKT',
-      'EVGGVE',
-      '.A..A.',
     ],
   },
   parrot: {
@@ -240,12 +210,6 @@ export const SPECIES = {
       '.DGKKGAAGKKGD.',
       'DGPPGGAAGGPPGD',
     ],
-    tiny: [
-      '.GQQG.',
-      'GKAAKG',
-      'EPGGPE',
-      '.X..X.',
-    ],
   },
   alphaq: {
     name: 'alphaQ',
@@ -283,12 +247,6 @@ export const SPECIES = {
       '.YYWKKWWKKWUU.',
       'YYWPWWAAWWPWUU',
     ],
-    tiny: [
-      '.YYOU.',
-      'YKWWKU',
-      'OWAAVV',
-      'II..II',
-    ],
   },
 } satisfies Record<Pet, Species>
 
@@ -297,8 +255,8 @@ export const PETS = Object.keys(SPECIES) as Pet[]
 type Rows = Record<number, string>
 type Px = [number, number, string]
 
-function build(base: string[], extra: Px[] = [], rows: Rows = {}, width = W): string[] {
-  const g = base.map((r, i) => (rows[i] ?? r).padEnd(width, '.'))
+function build(base: string[], extra: Px[] = [], rows: Rows = {}): string[] {
+  const g = base.map((r, i) => (rows[i] ?? r).padEnd(W, '.'))
   for (const [r, c, ch] of extra) {
     const row = g[r] ?? ''
     g[r] = row.slice(0, c) + ch + row.slice(c + 1)
@@ -329,17 +287,18 @@ const WING_UP: Px[] = [[5, 2, 'E'], [5, 11, 'E'], [6, 1, 'E'], [6, 12, 'E']]
 const holdFlag = (s: Species): Px[] => [[6, 12, 'E'], [6, 13, 'E'], [7, 12, s.body]]
 const TEARS: Px[] = [[6, 3, 'B'], [7, 3, 'B']]
 
-// ---------- 小号：走路时左右脚轮流抬起，飞的时候收起脚、上下扇翅膀 ----------
+// ---------- 跳舞：翅膀举到身体外侧，脚跟着交替抬起，身子左右摇 ----------
 
-const tinyFeet = (from: number, to: number): Px[] => range(from, to).map((c): Px => [3, c, '.'])
-const LIFT_LEFT = tinyFeet(0, TINY_W / 2)
-const LIFT_RIGHT = tinyFeet(TINY_W / 2, TINY_W)
-const TUCK_FEET = tinyFeet(0, TINY_W)
-// 收起第 2 行的翅膀，再画到两角：举起来在头顶两角，放下来在脚的位置两角
-const hideTinyWings = (s: Species): Px[] =>
-  [...(s.tiny[2] ?? '')].flatMap((ch, c): Px[] => (ch === 'E' ? [[2, c, s.body]] : []))
-const TINY_WING_UP: Px[] = [[0, 0, 'E'], [0, TINY_W - 1, 'E']]
-const TINY_WING_DOWN: Px[] = [[3, 0, 'E'], [3, TINY_W - 1, 'E']]
+const hideLeftWing = (s: Species): Px[] => hideWings(s).filter(([, c]) => c < 7)
+const hideRightWing = (s: Species): Px[] => hideWings(s).filter(([, c]) => c >= 7)
+// 举起的翅膀：贴着头两侧（第 0、13 列）竖起来
+const ARM_UP_LEFT: Px[] = [[3, 0, 'E'], [4, 0, 'E'], [5, 0, 'E']]
+const ARM_UP_RIGHT: Px[] = [[3, 13, 'E'], [4, 13, 'E'], [5, 13, 'E']]
+const clearFeet = (from: number, to: number): Px[] => range(from, to).map((c): Px => [11, c, '.'])
+const LIFT_LEFT = clearFeet(0, 7)
+const LIFT_RIGHT = clearFeet(7, 14)
+// 整张图往右挪几列：左摇 0、回正 1、右摇 2（道具区空着，挪了也不超出）
+const sway = (g: string[], n: number) => g.map(r => ('.'.repeat(n) + r).slice(0, W))
 
 // ---------- 道具 ----------
 
@@ -362,16 +321,20 @@ const SPARKLE: Px[] = [[1, 15, 'S'], [2, 14, 'S'], [2, 16, 'S'], [3, 15, 'S']]
 const MINI_Z: Px[] = [[0, 15, 'Z'], [0, 16, 'Z'], [1, 16, 'Z'], [2, 15, 'Z'], [2, 16, 'Z']]
 
 export type Pose =
-  | 'walkL' | 'walkR' | 'fly1' | 'fly2'
+  | 'dance1' | 'dance2' | 'dance3' | 'dance4'
   | 'done' | 'sleep' | 'open' | 'merged' | 'closed' | 'mini'
+
+/** 舞步按这个顺序循环 */
+export const DANCE = ['dance1', 'dance2', 'dance3', 'dance4'] as const satisfies readonly Pose[]
 
 function grids(s: Species): Record<Pose, string[]> {
   const sadTop: Rows = s.sadTop ? { 0: s.sadTop } : {}
   return {
-    walkL: build(s.tiny, LIFT_LEFT, {}, TINY_W),
-    walkR: build(s.tiny, LIFT_RIGHT, {}, TINY_W),
-    fly1: build(s.tiny, [...TUCK_FEET, ...hideTinyWings(s), ...TINY_WING_UP], {}, TINY_W),
-    fly2: build(s.tiny, [...TUCK_FEET, ...hideTinyWings(s), ...TINY_WING_DOWN], {}, TINY_W),
+    // 左摇举左翅抬右脚 → 回正两翅都举、开心 → 右摇举右翅抬左脚 → 回正眨眼
+    dance1: sway(build(s.base, [...hideLeftWing(s), ...ARM_UP_LEFT, ...LIFT_RIGHT]), 0),
+    dance2: sway(build(s.base, [...hideWings(s), ...ARM_UP_LEFT, ...ARM_UP_RIGHT, ...happy(s.face)]), 1),
+    dance3: sway(build(s.base, [...hideRightWing(s), ...ARM_UP_RIGHT, ...LIFT_LEFT]), 2),
+    dance4: sway(build(s.base, blink(s.face)), 1),
     done: build(s.base, [...happy(s.face), ...SPARKLE]),
     sleep: build(s.base, [...blink(s.face), ...ZZZ]),
     open: build(s.base, [...holdFlag(s), ...FLAG]),
@@ -402,7 +365,7 @@ const SPACE = 0x20
 type Sprite = { columns: number; rows: number; cells: string }
 
 function pack(grid: string[], pal: Record<string, number>): Sprite {
-  const width = Math.max(...grid.map(r => r.length))
+  const width = W
   const g = grid.length % 2 ? [...grid, ''] : grid
   const rows = g.length / 2
   const words = new Uint32Array(width * rows * 3)
@@ -430,19 +393,3 @@ export const SPRITES: Record<Pet, Record<Pose, Sprite>> = Object.fromEntries(
   }),
 ) as never
 
-// ---------- 尘土：走路时扬在身后，贴着脚的高度 ----------
-
-export const DUST_W = 3
-const DUST_PAL: Record<string, number> = { u: 0xb4a082, v: 0xe1d7c3 }
-// 尘土在身体右边（往左走）时的样子，靠身体的一侧在左；左边的是镜像。两帧：一团、散开
-const DUST_RIGHT = [
-  ['.u.', 'uvu'],
-  ['..v', 'u.u'],
-]
-const mirror = (g: string[]) => g.map(r => [...r].reverse().join(''))
-
-export type DustSide = 'left' | 'right'
-export const DUST: Record<DustSide, Sprite[]> = {
-  right: DUST_RIGHT.map(g => pack(g, DUST_PAL)),
-  left: DUST_RIGHT.map(g => pack(mirror(g), DUST_PAL)),
-}
