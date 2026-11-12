@@ -234,6 +234,65 @@ async function rasterKey(ui: { find: (q: never) => Promise<{ key?: string } | un
   return (await ui.find({ type: 'Raster' } as never))?.key ?? ''
 }
 
+// 真实引擎里 /clear 会换成新会话：session.end(clear) 之后 $.state 变空，且不会再触发 session.start。
+// 测试框架不会清空状态，这里自己接管状态读写，/clear 时手动清空。
+function sessionState(on: On) {
+  type Cell = { value: unknown; version: number }
+  let cells = new Map<string, Cell>()
+  const at = (e: { plugin: string; key: string; id?: string }) => `${e.plugin}/${e.key}/${e.id ?? ''}`
+  on('state.get', (_, e) => ({ value: cells.get(at(e)) ?? { value: undefined, version: 0 } }))
+  on('state.set', (_, e) => {
+    const version = cells.get(at(e))?.version ?? 0
+    if (e.ifVersion !== undefined && e.ifVersion !== version) {
+      return { value: { isSet: false as const, version } }
+    }
+    cells.set(at(e), { value: e.value, version: version + 1 })
+    return { value: { isSet: true as const, version: version + 1 } }
+  })
+  return { wipe: () => { cells = new Map() } }
+}
+
+async function clearSession($: Parameters<TestBody>[0], state: { wipe: () => void }) {
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} as never })
+  state.wipe()
+}
+
+test('/clear 之后还是固定选的宠物，中间也不会闪成小鸡', async ($, on) => {
+  const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false, store: { pet: 'duck' } })
+  const state = sessionState(on)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(20)
+  let ui = await $.ui.mount(BAND)
+  expect(await rasterKey(ui)).toBe('duck-mini')
+  await ui.unmount()
+
+  await clearSession($, state)
+  ui = await $.ui.mount(BAND) // 设置还没读回来：先沿用刚才那只
+  expect(await rasterKey(ui)).toBe('duck-mini')
+  await ui.unmount()
+
+  await clock.advance(600)
+  ui = await $.ui.mount(BAND)
+  expect(await rasterKey(ui)).toBe('duck-mini')
+  await ui.unmount()
+})
+
+test('/clear 之后隐藏的宠物仍然隐藏', async ($, on) => {
+  const clock = engine(on, {
+    branch: null, gh: '[]', mergedIntoDev: false, store: { pet: 'duck', hidden: true },
+  })
+  const state = sessionState(on)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clearSession($, state)
+  await clock.advance(600)
+
+  const ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Raster' } as never)).toBeUndefined()
+  await ui.unmount()
+})
+
 test('没设置过宠物：每次会话随机来一只', async ($, on) => {
   const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false, store: {} })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })

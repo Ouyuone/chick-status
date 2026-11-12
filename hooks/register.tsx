@@ -38,6 +38,8 @@ const POLL_MS = 15_000
 const GH_TTL = 120_000
 /** 命令触发后等 GitHub 落盘再查 */
 const AFTER_CMD_MS = 1500
+/** /clear 后隔多久在新会话里读回设置（会话切换在 session.end 钩子之后才完成） */
+const AFTER_CLEAR_MS = [50, 500]
 /** 合并目标：dev 本身，或 release 开头的分支（devops 之类不算） */
 const BASE_RE = /^(dev$|release)/
 /** 当前分支是 main、master、dev 本身或 release 开头时不显示 PR 状态（devops 之类照常显示） */
@@ -55,6 +57,8 @@ let lastMaxX = 79
 let poller: Timer | undefined
 let isRefreshing = false
 let isForcePending = false
+/** 上一次画的宠物：/clear 清空会话状态到读回设置之间沿用它，不闪成默认的小鸡 */
+let lastPet: Pet | null = null
 
 // ---------- 宠物 ----------
 
@@ -70,7 +74,7 @@ function parsePet(word: string): Pet | undefined {
 }
 
 async function petName($: Dollar): Promise<string> {
-  return SPECIES[(await read($, pet)) ?? 'chick'].name
+  return SPECIES[(await read($, pet)) ?? lastPet ?? 'chick'].name
 }
 
 // 英文名和显示名只差大小写时（alphaQ）不重复写
@@ -113,6 +117,21 @@ async function flashUnlessShowing($: Dollar, kind: PrState) {
   const f = await read($, flash)
   if (f && f.kind === kind && (await $.clock.now()) < f.until) return
   await showFlash($, kind)
+}
+
+// 从跨会话存储读回用户的设置：是否隐藏、固定的宠物。
+// 固定了就用固定的；随机模式下本次会话已经选过就不换（插件热重载也会触发 session.start）
+async function loadPrefs($: Dollar) {
+  const hidden = (await $.store.get(STORE_HIDDEN)) === true
+  await update($, isHidden, () => hidden)
+  const fixed = parsePet(String((await $.store.get(STORE_PET)) ?? ''))
+  await update($, pet, cur => fixed ?? cur ?? randomPet())
+}
+
+async function restoreAfterClear($: Dollar) {
+  await loadPrefs($)
+  await ensureTicker($)
+  await refresh($, false) // PR 状态也随会话清空了，马上补查
 }
 
 async function resetSession($: Dollar) {
@@ -288,18 +307,19 @@ export const register: Register = on => {
       description: '宠物状态：/chick 显示或隐藏，/chick <宠物> 换宠物，/chick 随机',
       argumentHint: '[小鸡|小鸭|企鹅|猫头鹰|鹦鹉|alphaQ|随机]',
     })
-    const hidden = (await $.store.get(STORE_HIDDEN)) === true
-    await update($, isHidden, () => hidden)
-    // 固定了就用固定的；随机模式下本次会话已经选过就不换（插件热重载也会触发 session.start）
-    const fixed = parsePet(String((await $.store.get(STORE_PET)) ?? ''))
-    await update($, pet, cur => fixed ?? cur ?? randomPet())
+    await loadPrefs($)
     await ensureTicker($)
     startPoller($)
     return next(e)
   })
 
   on('session.end', async ($, e, next) => {
-    if (e.reason === 'clear') await resetSession($)
+    if (e.reason === 'clear') {
+      await resetSession($)
+      // /clear 之后引擎换成新会话：$.state 清空，且不会再触发 session.start。
+      // 切换在这个钩子之后才完成，所以稍后在新会话里读回设置；第二次是保险
+      for (const ms of AFTER_CLEAR_MS) $.clock.after(ms, () => void restoreAfterClear($))
+    }
     return next(e)
   })
 
@@ -413,7 +433,8 @@ export const register: Register = on => {
     const last = await read($, lastSeconds)
     const pr = await read($, branchPr)
     const lm = await read($, localMerge)
-    const who = (await read($, pet)) ?? 'chick'
+    const who = (await read($, pet)) ?? lastPet ?? 'chick'
+    lastPet = who
     const now = await $.clock.now()
     const activeFlash = f && now < f.until ? f.kind : null
     const flying = fl !== null && now < fl.at + fl.ms
