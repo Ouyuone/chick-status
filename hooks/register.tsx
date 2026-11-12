@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
 
 import type { BranchPr, Flash, FlashKind, Flight, Pet, PrState } from '../types'
-import { BODY_LEFT, DUST, DUST_W, PETS, SPECIES, SPRITES, W } from './sprites'
+import { DUST, DUST_W, PETS, SPECIES, SPRITES, TINY_LEFT, W } from './sprites'
 import type { DustSide, Pose } from './sprites'
 
 const workingSince = atom({ plugin: 'chick-status', key: 'workingSince' } as const, null)
@@ -52,7 +52,7 @@ type Dollar = EngineInterface
 
 let ticker: Timer | undefined
 let tickerMs = 0
-/** 最近一次画的时候宠物最远能走到哪一列；起飞时用来算飞多远 */
+/** 最近一次画的时候小号的原位（最远能走到哪一列）；起飞时用来算飞多远 */
 let lastMaxX = 79
 let poller: Timer | undefined
 let isRefreshing = false
@@ -500,24 +500,25 @@ export const register: Register = on => {
     const art = <Raster key={`${who}-${pose}`} columns={sprite.columns} rows={sprite.rows} cells={sprite.cells} />
 
     const columns = e.props.bodyColumns
-    const maxX = columns - W
+    // 小号的原位：和右边大图的身体居中对齐
+    const maxX = columns - W + TINY_LEFT
     lastMaxX = maxX
     const isWalking = since !== null && !flying && !activeFlash
 
-    // 处理中在下面一行走来走去，完成后飞回最右边；气泡固定在右边
+    // 处理中缩成小号在下面一行走来走去，完成后飞回原位；气泡固定在右边
     if (since !== null || flying) {
       const x = flying ? flyX(fl, now, maxX) : walkX(now - (since ?? now), maxX)
+      // 处理中途来了 PR 动画：这几秒用大图，身体仍对着小号的位置
       let track = (
-        <Box key="pet-track" marginLeft={x}>
+        <Box key="pet-track" marginLeft={flying ? x : Math.max(0, x - TINY_LEFT)}>
           {art}
         </Box>
       )
       if (isWalking) {
-        // 走路的造型只有身体那一段；尘土扬在身后（和走的方向相反），左边放不下就不画
+        // 尘土扬在身后（和走的方向相反），左边放不下就不画
         const walked = now - since
         const side: DustSide = walkDir(walked, maxX) === 'left' ? 'right' : 'left'
-        const bodyX = x + BODY_LEFT
-        const hasDust = side === 'right' || bodyX >= DUST_W
+        const hasDust = side === 'right' || x >= DUST_W
         const puff = DUST[side][Math.floor(walked / STEP_MS) % 2]
         const dust = hasDust && puff && (
           <Raster key={`dust-${side}`} columns={DUST_W} rows={puff.rows} cells={puff.cells} />
@@ -525,7 +526,7 @@ export const register: Register = on => {
         track = (
           <Box
             key="pet-track"
-            marginLeft={hasDust && side === 'left' ? bodyX - DUST_W : bodyX}
+            marginLeft={hasDust && side === 'left' ? x - DUST_W : x}
             flexDirection="row"
             alignItems="flex-end"
           >
