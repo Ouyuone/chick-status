@@ -32,6 +32,8 @@ type Species = {
   body: string
   /** 难过时替换第 0 行（呆毛耷拉） */
   sadTop?: string
+  /** 脸是平的、没有尖嘴：侧身时嘴画在脸里，不伸出去 */
+  flatFace?: boolean
   palette: Record<string, number>
 }
 
@@ -215,6 +217,7 @@ export const SPECIES = {
     name: 'alphaQ',
     face: 'W',
     body: 'U',
+    flatFace: true,
     palette: {
       D: 0x5e53df, // 旗杆
       Y: 0xffcb24, // 黄
@@ -255,13 +258,17 @@ export const PETS = Object.keys(SPECIES) as Pet[]
 type Rows = Record<number, string>
 type Px = [number, number, string]
 
-function build(base: string[], extra: Px[] = [], rows: Rows = {}): string[] {
-  const g = base.map((r, i) => (rows[i] ?? r).padEnd(W, '.'))
+function paint(grid: string[], extra: Px[]): string[] {
+  const g = [...grid]
   for (const [r, c, ch] of extra) {
     const row = g[r] ?? ''
     g[r] = row.slice(0, c) + ch + row.slice(c + 1)
   }
   return g
+}
+
+function build(base: string[], extra: Px[] = [], rows: Rows = {}): string[] {
+  return paint(base.map((r, i) => (rows[i] ?? r).padEnd(W, '.')), extra)
 }
 
 // ---------- 表情、翅膀：按固定坐标改像素 ----------
@@ -298,7 +305,29 @@ const clearFeet = (from: number, to: number): Px[] => range(from, to).map((c): P
 const LIFT_LEFT = clearFeet(0, 7)
 const LIFT_RIGHT = clearFeet(7, 14)
 // 整张图往右挪几列：左摇 0、回正 1、右摇 2（道具区空着，挪了也不超出）
-const sway = (g: string[], n: number) => g.map(r => ('.'.repeat(n) + r).slice(0, W))
+const sway = (g: string[], n: number) => g.map(r => ('.'.repeat(n) + r).padEnd(W, '.').slice(0, W))
+
+// ---------- 转圈：侧身 → 背面 → 另一侧 → 正面 ----------
+
+// 五官：眼睛、高光、腮红，以及脸中间（第 4–7 行、第 4–9 列）的嘴
+const isFeature = (ch: string, r: number, c: number) =>
+  'KHP'.includes(ch) || (r >= 4 && r <= 7 && c >= 4 && c <= 9 && 'AO'.includes(ch))
+const clearFace = (g: string[], to: string) =>
+  g.map((row, r) => [...row].map((ch, c) => (isFeature(ch, r, c) ? to : ch)).join(''))
+const mirror = (g: string[]) => g.map(r => [...r].reverse().join(''))
+
+// 背面：五官抹掉，脸也换成身体色
+const back = (s: Species) => clearFace(s.base, s.body).map(r => r.replaceAll(s.face, s.body))
+
+// 侧身（朝右）：去掉中间第 7–10 列压窄成 10 列，五官抹成脸色，在右边画一只眼睛和伸出去的嘴
+const SIDE_EYE: Px[] = [[4, 5, 'H'], [4, 6, 'K'], [5, 5, 'K'], [5, 6, 'K']]
+const SIDE_BEAK: Px[] = [[5, 8, 'A'], [5, 9, 'A'], [6, 8, 'A']]
+const SIDE_MOUTH: Px[] = [[6, 7, 'A']]
+const side = (s: Species) =>
+  paint(
+    clearFace(s.base, s.face).map(r => r.slice(0, 7) + r.slice(11)),
+    [...SIDE_EYE, ...(s.flatFace ? SIDE_MOUTH : SIDE_BEAK)],
+  )
 
 // ---------- 道具 ----------
 
@@ -322,10 +351,15 @@ const MINI_Z: Px[] = [[0, 15, 'Z'], [0, 16, 'Z'], [1, 16, 'Z'], [2, 15, 'Z'], [2
 
 export type Pose =
   | 'dance1' | 'dance2' | 'dance3' | 'dance4'
+  | 'spin1' | 'spin2' | 'spin3' | 'spin4'
   | 'done' | 'sleep' | 'open' | 'merged' | 'closed' | 'mini'
 
-/** 舞步按这个顺序循环 */
-export const DANCE = ['dance1', 'dance2', 'dance3', 'dance4'] as const satisfies readonly Pose[]
+/** 舞步按这个顺序循环：跳 2 轮，再原地转一圈 */
+export const DANCE = [
+  'dance1', 'dance2', 'dance3', 'dance4',
+  'dance1', 'dance2', 'dance3', 'dance4',
+  'spin1', 'spin2', 'spin3', 'spin4',
+] as const satisfies readonly Pose[]
 
 function grids(s: Species): Record<Pose, string[]> {
   const sadTop: Rows = s.sadTop ? { 0: s.sadTop } : {}
@@ -335,6 +369,11 @@ function grids(s: Species): Record<Pose, string[]> {
     dance2: sway(build(s.base, [...hideWings(s), ...ARM_UP_LEFT, ...ARM_UP_RIGHT, ...happy(s.face)]), 1),
     dance3: sway(build(s.base, [...hideRightWing(s), ...ARM_UP_RIGHT, ...LIFT_LEFT]), 2),
     dance4: sway(build(s.base, blink(s.face)), 1),
+    // 侧身、背面、另一侧、正面；侧身只有 10 列宽，多挪 2 列对准身体中间
+    spin1: sway(side(s), 3),
+    spin2: sway(back(s), 1),
+    spin3: sway(mirror(side(s)), 3),
+    spin4: sway(s.base, 1),
     done: build(s.base, [...happy(s.face), ...SPARKLE]),
     sleep: build(s.base, [...blink(s.face), ...ZZZ]),
     open: build(s.base, [...holdFlag(s), ...FLAG]),

@@ -1,6 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
+import { PETS, SPRITES } from '../hooks/sprites'
+
 const BAND = {
   plugin: 'chick-status',
   component: 'AbovePrompt',
@@ -378,23 +380,53 @@ async function sizeOf(ui: Rastered, key: string) {
   return r ? `${String(r.props.rows)}x${String(r.props.columns)}` : undefined
 }
 
-test('处理中原地跳舞：4 个舞步每 0.25 秒换一个，循环', async ($, on) => {
+test('处理中原地跳舞：每 0.25 秒换一步，跳 2 轮再原地转一圈，然后接着跳', async ($, on) => {
   const clock = engine(on, { branch: null, gh: '[]', mergedIntoDev: false })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await $.turn.start({ text: 'hi', turnId: 't1' })
 
   const seen: string[] = []
-  let prev = 0
-  for (const at of [0, 250, 500, 750, 1000]) {
-    await clock.advance(at - prev)
-    prev = at
+  for (let step = 0; step < 13; step++) {
+    if (step > 0) await clock.advance(250)
     const ui = await $.ui.mount(BAND)
-    seen.push(await rasterKey(ui))
+    seen.push((await rasterKey(ui)).replace('chick-', ''))
     expect(await text(ui)).toContain('处理中')
     await ui.unmount()
   }
-  expect(seen).toEqual(['chick-dance1', 'chick-dance2', 'chick-dance3', 'chick-dance4', 'chick-dance1'])
+  expect(seen).toEqual([
+    'dance1', 'dance2', 'dance3', 'dance4',
+    'dance1', 'dance2', 'dance3', 'dance4',
+    'spin1', 'spin2', 'spin3', 'spin4', // 侧身、背面、另一侧、正面
+    'dance1',
+  ])
+})
+
+const EYE = 0x1e1919
+const CLEAR = 0x01000000
+
+// 眼睛在身体的哪一边：拿眼睛所在的列和整只宠物（不透明部分）的中线比
+function eyeSides(sprite: { columns: number; rows: number; cells: string }) {
+  const bytes = Uint8Array.from(atob(sprite.cells), ch => ch.charCodeAt(0))
+  const words = new Uint32Array(bytes.buffer)
+  const opaque: number[] = [], eyes: number[] = []
+  for (let i = 0; i < sprite.columns * sprite.rows; i++) {
+    const col = i % sprite.columns
+    const fg = words[i * 3 + 1], bg = words[i * 3 + 2]
+    if (fg !== CLEAR || bg !== CLEAR) opaque.push(col)
+    if (fg === EYE || bg === EYE) eyes.push(col)
+  }
+  const mid = (Math.min(...opaque) + Math.max(...opaque)) / 2
+  return new Set(eyes.map(c => (c < mid ? 'left' : 'right')))
+}
+
+test('转圈：背面看不到眼睛，侧身只有一边有眼睛，两次侧身朝向相反', () => {
+  for (const p of PETS) {
+    expect([...eyeSides(SPRITES[p].spin2)]).toEqual([])
+    expect([...eyeSides(SPRITES[p].spin1)]).toEqual(['right'])
+    expect([...eyeSides(SPRITES[p].spin3)]).toEqual(['left'])
+    expect([...eyeSides(SPRITES[p].spin4)].sort()).toEqual(['left', 'right'])
+  }
 })
 
 test('跳舞和完成都是原尺寸，气泡在宠物左边并排', async ($, on) => {
@@ -406,7 +438,8 @@ test('跳舞和完成都是原尺寸，气泡在宠物左边并排', async ($, o
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await clock.advance(2000)
   let ui = await $.ui.mount(BAND)
-  expect(await sizeOf(ui, 'chick-dance1')).toBe('6x19')
+  expect(await rasterKey(ui)).toBe('chick-spin1') // 第 2 秒刚好在转圈
+  expect(await sizeOf(ui, 'chick-spin1')).toBe('6x19')
   const row = await ui.find({ type: 'Box', props: { flexDirection: 'row' } } as never)
   expect(row?.props.alignItems).toBe('flex-end')
   await ui.unmount()
