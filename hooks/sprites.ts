@@ -32,8 +32,10 @@ type Species = {
   body: string
   /** 难过时替换第 0 行（呆毛耷拉） */
   sadTop?: string
-  /** 脸是平的、没有尖嘴：侧身时嘴画在脸里，不伸出去 */
-  flatFace?: boolean
+  /** 转圈时的侧身（朝右），12 行 × 14 列；朝左的那一面镜像得到 */
+  side: string[]
+  /** 转圈时的背面；不画就用底图抹掉五官、脸换成身体色 */
+  back?: string[]
   palette: Record<string, number>
 }
 
@@ -71,6 +73,20 @@ export const SPECIES = {
       '.DYKKYAAYKKYD.',
       'DYPPYYAAYYPPYD',
     ],
+    side: [
+      '......D.D.....',
+      '....DDDDDDD...',
+      '...DYYYYYLLD..',
+      '..DYYYYYYYLLD.',
+      '..DYYYYYHKYYD.',
+      '..DYYYYYKKYYAA', // 喙伸出去
+      '.DYYYYYYPPYYA.',
+      'DYYYEEEEYYYYD.', // 翅膀贴在身体侧面
+      'DEEEEEEYYYYYD.',
+      '.DYYYYYYYYYD..',
+      '..DDDDDDDDD...',
+      '....AAA.AAA...',
+    ],
   },
   duck: {
     name: '小鸭',
@@ -106,6 +122,20 @@ export const SPECIES = {
       '.DYKKYAAYKKYD.',
       'DYPPAAAAAAPPYD',
     ],
+    side: [
+      '.......DD.....',
+      '....DDDDDDD...',
+      '...DYYYYYLLD..',
+      '..DYYYYYYYLLD.',
+      '..DYYYYYHKYYD.',
+      '..DYYYYYKKYAAA', // 扁嘴伸出去
+      '.DYYYYYYPPYOOO',
+      'DYYYEEEEYYYYD.',
+      'DEEEEEEYYYYYD.',
+      '.DYYYYYYYYYD..',
+      '..DDDDDDDDD...',
+      '...AAAA.AAAA..',
+    ],
   },
   penguin: {
     name: '企鹅',
@@ -139,6 +169,20 @@ export const SPECIES = {
       '..DDDDDDDDDD..',
       '.DNKKWAAWKKND.',
       'DNNPWWAAWWPNND',
+    ],
+    side: [
+      '..............',
+      '....DDDDDDD...',
+      '...DNNNNNLND..',
+      '..DNNNNNWWWND.',
+      '..DNNNNWHKWWD.',
+      '..DNNNNWKKWWAA',
+      '.DNNNNNWPWWWA.',
+      'DNNNEEENNWWWD.', // 鳍贴在黑背上，白肚皮朝前
+      'DNEEEENNWWWWD.',
+      '.DNNNNNWWWWD..',
+      '..DDDDDDDDD...',
+      '....AAA.AAA...',
     ],
   },
   owl: {
@@ -174,6 +218,35 @@ export const SPECIES = {
       '.DDDDDDDDDDDD.',
       '.DTKKTAATKKTD.',
       'DGGTTTAATTTGGD',
+    ],
+    side: [
+      '....DD...DD...',
+      '....DGDDDGD...',
+      '...DGGGGGGLD..',
+      '..DGGGGGTTTGD.',
+      '..DGGGGTHKTGD.', // 脸盘只露一半
+      '..DGGGGTKKTTA.',
+      '.DGGGGGGTTTGA.',
+      'DGGGEEEGVGVGD.',
+      'DEEEEEGVGVGGD.',
+      '.DGGGGGGGGGD..',
+      '..DDDDDDDDD...',
+      '....AAA.AAA...',
+    ],
+    // 背面没有脸盘和胸前斑点，底下露出尾羽
+    back: [
+      '.DD........DD.',
+      '.DGDDDDDDDDGD.',
+      '.DGGGGGGGGLGD.',
+      '.DGGGGGGGGGGD.',
+      '.DGGGGGGGGGGD.',
+      '.DGGGGGGGGGGD.',
+      'DGGGGGGGGGGGGD',
+      'DEGGGGGGGGGGED',
+      'DEEGGGEEGGGEED',
+      '.DEGGEEEEGGED.',
+      '..DDDDDDDDDD..',
+      '...AAA..AAA...',
     ],
   },
   parrot: {
@@ -212,12 +285,25 @@ export const SPECIES = {
       '.DGKKGAAGKKGD.',
       'DGPPGGAAGGPPGD',
     ],
+    side: [
+      '......QQQ.....',
+      '....DDQQDDD...',
+      '...DGGGGGLLD..',
+      '..DGGGGGGGLLD.',
+      '..DGGGGGHKGGD.',
+      '..DGGGGGKKGAAA', // 弯钩嘴，尖往下勾
+      '.DGGGGGGPPGGAO',
+      'DGGGEEEEGGGGD.',
+      'DEEEEEEGGGGGD.',
+      '.DGGGGGGGGGD..',
+      '..DDDDDDDDD...',
+      '....XXX.XXX...',
+    ],
   },
   alphaq: {
     name: 'alphaQ',
     face: 'W',
     body: 'U',
-    flatFace: true,
     palette: {
       D: 0x5e53df, // 旗杆
       Y: 0xffcb24, // 黄
@@ -226,6 +312,7 @@ export const SPECIES = {
       V: 0x3f5ce0, // 蓝
       I: 0x5e53df, // 底下的横条，分成两段当脚
       W: 0xf5f5fa, // Q 中间的脸
+      J: 0xd2c8f5, // 背面圆环中间
       E: 0xffcb24, // 能量火花（代替翅膀）
       A: 0x2b2370, // 嘴
       P: 0xfa968c,
@@ -249,6 +336,36 @@ export const SPECIES = {
       '..YYYYOOOOUU..',
       '.YYWKKWWKKWUU.',
       'YYWPWWAAWWPWUU',
+    ],
+    // 侧身：圆环当外壳，白脸只在朝前那边露出一弯
+    side: [
+      '.....YYYOO....',
+      '...YYYYYOOOU..',
+      '..YYYYYOOWWUU.',
+      '.YYYYYOOWWWWU.',
+      '.YYYYOOWHKWWUU',
+      '.YOOOOOWKKWWUU',
+      '.OOOUUUWWPWAUV',
+      '..OUUUUUWWWUVV',
+      '...UUUUUUUVVVV',
+      '.....UUUVVVVVV',
+      '..............',
+      '...IIII.IIII..',
+    ],
+    // 背面：圆环左右翻过来，中间换成浅紫
+    back: [
+      '....OOYYYY....',
+      '..UUOOOOYYYY..',
+      '.UUOJJJJJJYYY.',
+      '.UUJJJJJJJJYY.',
+      'UUJJJJJJJJJJYY',
+      'UUJJJJJJJJJJOY',
+      'VUJJJJJJJJJJOO',
+      'VVUJJJJJJJJUO.',
+      'VVVUUJJJJUUU..',
+      'VVVVVVUUUU....',
+      '..............',
+      '.IIIII..IIIII.',
     ],
   },
 } satisfies Record<Pet, Species>
@@ -316,18 +433,9 @@ const clearFace = (g: string[], to: string) =>
   g.map((row, r) => [...row].map((ch, c) => (isFeature(ch, r, c) ? to : ch)).join(''))
 const mirror = (g: string[]) => g.map(r => [...r].reverse().join(''))
 
-// 背面：五官抹掉，脸也换成身体色
-const back = (s: Species) => clearFace(s.base, s.body).map(r => r.replaceAll(s.face, s.body))
-
-// 侧身（朝右）：去掉中间第 7–10 列压窄成 10 列，五官抹成脸色，在右边画一只眼睛和伸出去的嘴
-const SIDE_EYE: Px[] = [[4, 5, 'H'], [4, 6, 'K'], [5, 5, 'K'], [5, 6, 'K']]
-const SIDE_BEAK: Px[] = [[5, 8, 'A'], [5, 9, 'A'], [6, 8, 'A']]
-const SIDE_MOUTH: Px[] = [[6, 7, 'A']]
-const side = (s: Species) =>
-  paint(
-    clearFace(s.base, s.face).map(r => r.slice(0, 7) + r.slice(11)),
-    [...SIDE_EYE, ...(s.flatFace ? SIDE_MOUTH : SIDE_BEAK)],
-  )
+// 背面：没手画就把五官抹掉，脸也换成身体色
+const back = (s: Species) =>
+  s.back ?? clearFace(s.base, s.body).map(r => r.replaceAll(s.face, s.body))
 
 // ---------- 道具 ----------
 
@@ -369,10 +477,10 @@ function grids(s: Species): Record<Pose, string[]> {
     dance2: sway(build(s.base, [...hideWings(s), ...ARM_UP_LEFT, ...ARM_UP_RIGHT, ...happy(s.face)]), 1),
     dance3: sway(build(s.base, [...hideRightWing(s), ...ARM_UP_RIGHT, ...LIFT_LEFT]), 2),
     dance4: sway(build(s.base, blink(s.face)), 1),
-    // 侧身、背面、另一侧、正面；侧身只有 10 列宽，多挪 2 列对准身体中间
-    spin1: sway(side(s), 3),
+    // 侧身、背面、另一侧、正面
+    spin1: sway(s.side, 1),
     spin2: sway(back(s), 1),
-    spin3: sway(mirror(side(s)), 3),
+    spin3: sway(mirror(s.side), 1),
     spin4: sway(s.base, 1),
     done: build(s.base, [...happy(s.face), ...SPARKLE]),
     sleep: build(s.base, [...blink(s.face), ...ZZZ]),

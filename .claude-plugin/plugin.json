@@ -1,6 +1,6 @@
 {
   "name": "chick-status",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "license": "MIT",
   "description": "像素宠物（小鸡、小鸭、企鹅、猫头鹰、鹦鹉、alphaQ）站在输入框上方右侧，处理中来回走动扬起尘土、完成时飞回原位，以及当前分支 PR 状态（gh 轮询 + 本地合并判断）",
   "types": "./types/index.d.ts"
